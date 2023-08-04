@@ -3,7 +3,7 @@
 #include "../../../ChappieBsp/Chappie.h"
 #include "ArduinoJson.h"
 #define InternetIONum 5
-#define APIUpdateTime 5
+#define APIUpdateTime 1000 //ms
 
 LV_IMG_DECLARE(ui_img_icon_Synology_png);
 static std::string app_name = "Synology";
@@ -13,7 +13,7 @@ static LGFX_Sprite* screen;
 static void Info_update(lv_timer_t * timer);
 static int SidJson(String Json);
 static void CPU_Net_RAM_Json(String Json);
-String HttpGetJson(String url);
+static String HttpGetJson(String url);
 static TaskHandle_t  API_Update_Task;
 
 WiFiClient client;
@@ -25,6 +25,7 @@ struct SynologyConfig{
     String  User   = "Chappie";
     String  Password  = "uUYVG<4n";
     String  Sid;
+    bool  SidStatus = false;
     String SidAPI = "https://dsm.yeely.top:1666/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
     String CPUAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
     String LogoutAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
@@ -45,13 +46,20 @@ struct {
     int8_t SIDCode = 0;
 }TaskStatus;
 
-lv_obj_t * ui_ScreenLaugh;
+lv_obj_t * ui_SyPageMain,*ui_SyPageSec;
 lv_obj_t * CPULabel,*RAMLabel;
 lv_obj_t * Uplabel,*Downlabel,*mask;
 static lv_obj_t * net_chart;
 static lv_chart_series_t * ser1;
 static lv_chart_series_t * ser2;
+static int SynologyPad_Current = 0;
 
+static std::array<_lv_obj_t**, 2> SynologyPad_List = {
+    &ui_SyPageMain,
+    &ui_SyPageSec,
+};
+
+//--------------page Main style-------------------
 lv_obj_t * ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
     lv_obj_t * arc = lv_arc_create(obj);
     lv_obj_set_size(arc, 110, 110);
@@ -201,7 +209,6 @@ static void draw_event_cb(lv_event_t * e)
     }
 }
 
-
 void Network_Charts(lv_obj_t* obj)
 {
     /*Create a net_chart*/
@@ -225,16 +232,11 @@ void Network_Charts(lv_obj_t* obj)
     ser2 = lv_chart_add_series(net_chart, lv_color_hex(0xFFFB7D), LV_CHART_AXIS_SECONDARY_Y);
 
 }
-
-
-void UserLogout(){
-    HttpGetJson(SyConfig.LogoutAPI + SyConfig.Sid);
-}
-
 void Content_Update(lv_obj_t * obj,float value){
     lv_arc_set_value(obj,(int16_t)value);
     lv_label_set_text_fmt(lv_obj_get_child(obj,0),"%d %%",(int16_t)value);
 }
+
 float NetworkSpeed(int32_t bytes) {
     if (bytes < 1024 * 1024) {
         return  float(bytes / 1000.0);
@@ -272,44 +274,13 @@ void Net_Update(lv_obj_t * net1,lv_obj_t * net2,int32_t value1,int32_t value2){
 
 }
 
-void RequestTask(void *arg)
-{
-    TaskStatus.TaskOnWork = true;
-    while (true)
-    {
-        /* code */
-        if(!TaskStatus.SIDStatu && device->Wf.isConnected()){
-            TaskStatus.SIDCode  =  SidJson(HttpGetJson(SyConfig.SidAPI));
-            TaskStatus.SIDStatu = true;
-        }
-        if (TaskStatus.SIDStatu)
-        {
-            CPU_Net_RAM_Json(HttpGetJson(SyConfig.CPUAPI + SyConfig.Sid));           
-        }
-        vTaskDelay(1000);
-    }
-    vTaskDelete(API_Update_Task);
-}
-void ScreenMain(){
-    ui_ScreenLaugh = lv_scr_act();
-    lv_obj_clear_flag(ui_ScreenLaugh, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_ScreenLaugh, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_width(ui_ScreenLaugh,280);
-    lv_obj_set_height(ui_ScreenLaugh,240);
-    lv_obj_set_style_bg_opa(ui_ScreenLaugh, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_align(ui_ScreenLaugh, LV_ALIGN_CENTER);
-    CPULabel = ArcCreate(ui_ScreenLaugh,"CPU",1,2);
-    RAMLabel = ArcCreate(ui_ScreenLaugh,"RAM",1,132);
-    Network_Charts(ui_ScreenLaugh);
-    Net_UpDownload_box(ui_ScreenLaugh);
-    _Info_update = lv_timer_create(Info_update, 1500,NULL);
-    Info_update(_Info_update);     // status bar time update
-    xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 4,NULL, 1, &API_Update_Task, 1 );
-}
-void ScreenInit(){
-    
-}
+//--------------page Main style-------------------
 
+//-----------------------Function-------------------
+void UserLogout(){
+    HttpGetJson(SyConfig.LogoutAPI + SyConfig.Sid);
+    TaskStatus.SIDStatu =false;
+}
 // Json analysis
 static int SidJson(String Json){
     StaticJsonDocument<384> doc;
@@ -319,12 +290,10 @@ static int SidJson(String Json){
     // if (strcmp(isSucces,"false") == 0){
     //     code = doc["error"]["code"];
     //     TaskStatus.SIDCode = code;
-    //     return code;
     // }
     SyConfig.Sid = doc["data"]["sid"].as<String>();
     return code; 
 }
-
 static void CPU_Net_RAM_Json(String Json){
     StaticJsonDocument<1024> doc;
     deserializeJson(doc,Json);
@@ -350,18 +319,120 @@ static void CPU_Net_RAM_Json(String Json){
     }
 
 }
-//
-
-void ScreenStorage(){
-    // device->Wf.requesturl(SyConfig.domain,SyConfig.Sport,SyConfig.CPUAPI);
+static String HttpGetJson(String url){
+    HTTPClient http;
+    http.begin(url);
+    int code = http.GET();
+    if ( code == HTTP_CODE_OK){
+        String json = http.getString();
+        // printf("Json:%s",json.c_str());
+        return json;
+    }else{
+        http.end();
+        return "None";
+    }
 }
-// Timer
+static void ui_event_SyPad(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    lv_obj_t * target = lv_event_get_target(e);
+    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_LEFT) {
+        // printf("->\n");
+        if (SynologyPad_Current < (SynologyPad_List.size() - 1)) {
+            SynologyPad_Current++;
+            lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+            // _watch_time_update(_timer_watch_time_update);
+        }
+    }
+    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) {
+        // printf("<-\n");
+        SynologyPad_Current--;
+        if (SynologyPad_Current < 0) {
+            SynologyPad_Current = 0;
+        }
+        else {
+            lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 0, false);
+            // _watch_time_update(_timer_watch_time_update);
+        }
+    }
+}
+
+//-----------------------Function-------------------
+
+//-----------------------Task-------------------
+void RequestTask(void *arg)
+{
+    TaskStatus.TaskOnWork = true;
+    while (true)
+    {
+        /* code */
+        if(!TaskStatus.SIDStatu && device->Wf.isConnected()){
+            TaskStatus.SIDCode  =  SidJson(HttpGetJson(SyConfig.SidAPI));
+            TaskStatus.SIDStatu = true;
+        }
+        if (TaskStatus.SIDStatu)
+        {
+            CPU_Net_RAM_Json(HttpGetJson(SyConfig.CPUAPI + SyConfig.Sid));           
+        }
+        vTaskDelay(APIUpdateTime);
+    }
+    vTaskDelete(API_Update_Task);
+}
 static void Info_update(lv_timer_t * timer){
     
     Content_Update(CPULabel,SystemInfo.CPUUse);
     Content_Update(RAMLabel,SystemInfo.RAMUse);
     Net_Update(Uplabel,Downlabel,SystemInfo.Upload,SystemInfo.Downlaod);
 }
+//-----------------------Task-------------------
+
+
+void ScreenMain(){
+    ui_SyPageMain = lv_obj_create(NULL);
+    lv_obj_clear_flag(ui_SyPageMain, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_bg_color(ui_SyPageMain, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_width(ui_SyPageMain,280);
+    lv_obj_set_height(ui_SyPageMain,240);
+    lv_obj_set_style_bg_opa(ui_SyPageMain, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_align(ui_SyPageMain, LV_ALIGN_CENTER);
+    CPULabel = ArcCreate(ui_SyPageMain,"CPU",1,2);
+    RAMLabel = ArcCreate(ui_SyPageMain,"RAM",1,132);
+    Network_Charts(ui_SyPageMain);
+    Net_UpDownload_box(ui_SyPageMain);
+    
+}
+void ScreenSec(){
+    ui_SyPageSec = lv_obj_create(NULL);
+    lv_obj_clear_flag(ui_SyPageSec, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_bg_color(ui_SyPageSec, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_width(ui_SyPageSec,280);
+    lv_obj_set_height(ui_SyPageSec,240);
+    lv_obj_set_style_bg_opa(ui_SyPageSec, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_align(ui_SyPageSec, LV_ALIGN_CENTER);
+
+    lv_obj_t * arc = lv_arc_create(ui_SyPageSec);
+    lv_obj_set_size(arc, 150, 150);
+    lv_arc_set_rotation(arc, 135);
+    lv_arc_set_bg_angles(arc, 0, 270);
+    lv_arc_set_value(arc, 40);
+    lv_obj_center(arc);
+    
+}
+void ScreenInit(){
+    ScreenMain();
+    ScreenSec();
+}
+
+
+
+
+//
+
+void ScreenStorage(){
+    // device->Wf.requesturl(SyConfig.domain,SyConfig.Sport,SyConfig.CPUAPI);
+}
+// Timer
+
 void ErrorPage(const char *text){
     screen = new LGFX_Sprite(&device->Lcd);
     screen->fillScreen(TFT_BLACK);
@@ -372,18 +443,7 @@ void ErrorPage(const char *text){
     screen->printf(" > (=.=) <\n");
     screen->pushSprite(0, 0);
 }
-String HttpGetJson(String url){
-    HTTPClient http;
-    http.begin(url);
-    int code = http.GET();
-    if ( code == HTTP_CODE_OK){
-        String json = http.getString();
-        return json;
-    }else{
-        http.end();
-        return "None";
-    }
-}
+
 namespace App {
 
     /**
@@ -415,9 +475,17 @@ namespace App {
     void App_Synology_onCreate()
     {
         UI_LOG("[%s] onCreate\n", App_Synology_appName().c_str());
-        
-        ScreenMain();
+        // UI Init
+        ScreenInit();
+        for (auto i : SynologyPad_List) {
+            lv_obj_add_event_cb(*i, ui_event_SyPad, LV_EVENT_ALL, NULL);
+        }
+        SynologyPad_Current = 0;
+        lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, true);
 
+        _Info_update = lv_timer_create(Info_update, APIUpdateTime + 500,NULL);
+        Info_update(_Info_update);     // status bar time update
+        xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 4,NULL, 1, &API_Update_Task, 1 );
         // switch (code)
         // {
         //     case 0:
@@ -471,10 +539,10 @@ namespace App {
     void App_Synology_onDestroy()
     {
         UI_LOG("[%s] onDestroy\n", App_Synology_appName().c_str());
-        
+        UserLogout();
         lv_timer_del(_Info_update);
         vTaskDelete(API_Update_Task);
-        UserLogout();
+        
     }
 
 
