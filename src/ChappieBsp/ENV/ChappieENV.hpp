@@ -18,13 +18,14 @@ class ChappieENV : public BMP280 {
     public:
         using BMP280::BMP280;
 
-        inline void init(float pressureOffset = 0)
+        inline bool init(float pressureOffset = 0)
         {
             setPressureOffset(pressureOffset);
 
             bool val = BMP280::init();
             printf("BMP280 Init: ");
             printf(val ? "True\n" : "False\n");
+            return val;
             /* Default settings from datasheet. */
             // setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
             //             Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */

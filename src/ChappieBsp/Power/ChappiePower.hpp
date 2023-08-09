@@ -28,17 +28,22 @@ class ChappiePower {
     public:
         ChappiePower() {}
         ~ChappiePower() {}
-        
+        inline void CloseLDO()
+        { 
+            #if AXPManage
+                pmu.setOutputEnable(pmu.OP_LDO2,false);
+                pmu.setOutputEnable(pmu.OP_LDO3,false);
+            #endif
+        }
         inline void init()
         {
             #if IP5Manage
                 gpio_reset_pin(CHAPPIE_BATM_ADC);
                 gpio_reset_pin(CHAPPIE_BATM_EN);
-
                 gpio_set_direction(CHAPPIE_BATM_EN, GPIO_MODE_OUTPUT_OD);
-
                 analogReadResolution(12);
             #endif
+            
             // AXP173
             #if AXPManage
                 bool AXPInit = pmu.begin();
@@ -69,7 +74,7 @@ class ChappiePower {
 
 
         }
-
+        
         inline void powerOff()
         {   
             #if IP5Manage

@@ -3,8 +3,8 @@
 #include "../../../ChappieBsp/Chappie.h"
 #include "ArduinoJson.h"
 #define InternetIONum 5
-#define APIUpdateTime 1000 //ms
-
+#define APIUpdateTime 2000 //ms
+#define Ubuntu18 ResourcePool::GetFont("UbuntuBold18")
 LV_IMG_DECLARE(ui_img_icon_Synology_png);
 static std::string app_name = "Synology";
 static CHAPPIE* device;
@@ -15,21 +15,25 @@ static int SidJson(String Json);
 static void CPU_Net_RAM_Json(String Json);
 static String HttpGetJson(String url);
 static TaskHandle_t  API_Update_Task;
+static WiFiClient client;
+struct MeterInfo{
+    lv_obj_t * METER;
+    lv_meter_indicator_t* INDIC;
+};
+static MeterInfo Meter1,Meter2,Meter;
 
-WiFiClient client;
+static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x);
 
 struct SynologyConfig{
-    const char *  domain = "dsm.yeely.top";
-    int16_t Sport  = 1666;
     int16_t SSHPort= 22;
-    String  User   = "Chappie";
-    String  Password  = "uUYVG<4n";
+    String  User   = "XXXXX";
+    String  Password  = "XXXXXX";
     String  Sid;
     bool  SidStatus = false;
-    String SidAPI = "https://dsm.yeely.top:1666/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
-    String CPUAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
-    String LogoutAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
-    String StorageAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
+    String SidAPI = "http://XXXXX:80/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
+    String CPUAPI = ("http://XXXXX:80/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
+    String LogoutAPI = ("http://XXXXX:80/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
+    String StorageAPI = ("http://XXXXX:80/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
 }SyConfig;
 struct SynologyInfo{
     const char *  ServerName = "";
@@ -46,10 +50,10 @@ struct {
     int8_t SIDCode = 0;
 }TaskStatus;
 
-lv_obj_t * ui_SyPageMain,*ui_SyPageSec;
-lv_obj_t * CPULabel,*RAMLabel;
-lv_obj_t * Uplabel,*Downlabel,*mask;
+static lv_obj_t * ui_SyPageMain,*ui_SyPageSec;
+static lv_obj_t * Uplabel,*Downlabel,*mask;
 static lv_obj_t * net_chart;
+static lv_obj_t * TimeLabel;
 static lv_chart_series_t * ser1;
 static lv_chart_series_t * ser2;
 static int SynologyPad_Current = 0;
@@ -59,33 +63,72 @@ static std::array<_lv_obj_t**, 2> SynologyPad_List = {
     &ui_SyPageSec,
 };
 
+
+// animation
+
+
 //--------------page Main style-------------------
-lv_obj_t * ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
-    lv_obj_t * arc = lv_arc_create(obj);
-    lv_obj_set_size(arc, 110, 110);
-    lv_arc_set_rotation(arc, 135);
-    lv_arc_set_bg_angles(arc, 0, 270);
-    lv_obj_set_style_arc_color(arc,lv_color_hex(0x4C4C4C),LV_ARC_DRAW_PART_BACKGROUND);
-    lv_obj_set_style_arc_color(arc,lv_color_hex(0x53DE77),LV_PART_INDICATOR);
+// lv_obj_t * ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
+//     lv_obj_t * arc = lv_arc_create(obj);
+//     lv_obj_set_size(arc, 110, 110);
+//     lv_arc_set_rotation(arc, 135);
+//     lv_arc_set_bg_angles(arc, 0, 270);
+//     lv_obj_set_style_arc_color(arc,lv_color_hex(0x4C4C4C),LV_ARC_DRAW_PART_BACKGROUND);
+//     lv_obj_set_style_arc_color(arc,lv_color_hex(0x53DE77),LV_PART_INDICATOR);
+    
+//     lv_arc_set_value(arc, value);   
+//     lv_obj_set_align(arc,LV_ALIGN_TOP_LEFT);
+//     lv_obj_set_x(arc,20+x);
+//     lv_obj_set_y(arc,10);
+    
+//     lv_obj_t * tvalue= lv_label_create(arc);
+//     lv_label_set_text_fmt(tvalue,"%d%%",value);
+//     lv_obj_set_style_text_font(tvalue,ResourcePool::GetFont("UbuntuBold18"),0);
+//     lv_obj_set_style_text_color(tvalue,lv_color_hex(0xFFFFFF),0);
+//     lv_obj_set_align(tvalue,LV_ALIGN_CENTER);
+//     lv_obj_t * t = lv_label_create(arc);
+//     lv_obj_set_style_text_color(t,lv_color_hex(0xFFFFFF),0);
+//     lv_label_set_text(t,text);
+//     lv_obj_set_align(t,LV_ALIGN_BOTTOM_MID);
+//     lv_obj_set_y(t,-10);
+    
+//     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
+//     lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+//     return arc;
+// }
+static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
+    Meter.METER = lv_meter_create(obj);
+    lv_obj_remove_style(Meter.METER, NULL, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(Meter.METER, 0, 0);
+    lv_obj_set_style_border_opa(Meter.METER, 0, 0);
+    lv_obj_set_style_radius(Meter.METER,1,0);
+    lv_meter_scale_t* scale_min1 = lv_meter_add_scale(Meter.METER);
+    lv_obj_set_size(Meter.METER, 150, 150);
+    lv_obj_set_pos(Meter.METER, 0, 0);
 
-    lv_arc_set_value(arc, value);
-    lv_obj_set_align(arc,LV_ALIGN_TOP_LEFT);
-    lv_obj_set_x(arc,20+x);
-    lv_obj_set_y(arc,10);
+    lv_meter_set_scale_ticks(Meter.METER, scale_min1, 50, 2, 10, lv_color_hex(0x4C4C4C));
+    lv_meter_set_scale_range(Meter.METER, scale_min1, 0, 100, 270, 135);
 
-    lv_obj_t * tvalue= lv_label_create(arc);
+    Meter.INDIC = lv_meter_add_scale_lines(Meter.METER, scale_min1, lv_color_hex(0x85FFBD), lv_color_hex(0xFF6E3B),false,0);
+    lv_meter_set_indicator_end_value(Meter.METER, (lv_meter_indicator_t*)Meter.INDIC, value);
+    lv_obj_set_align(Meter.METER,LV_ALIGN_TOP_LEFT);
+    lv_obj_set_x(Meter.METER,x);
+    lv_obj_set_y(Meter.METER,-3);
+
+
+    lv_obj_t * tvalue= lv_label_create(Meter.METER);
     lv_label_set_text_fmt(tvalue,"%d%%",value);
-    lv_obj_set_style_text_font(tvalue,ResourcePool::GetFont("UbuntuBold18"),0);
+    lv_obj_set_style_text_font(tvalue,Ubuntu18,0);
     lv_obj_set_style_text_color(tvalue,lv_color_hex(0xFFFFFF),0);
     lv_obj_set_align(tvalue,LV_ALIGN_CENTER);
-    lv_obj_t * t = lv_label_create(arc);
+    
+    lv_obj_t * t = lv_label_create(Meter.METER);
     lv_obj_set_style_text_color(t,lv_color_hex(0xFFFFFF),0);
     lv_label_set_text(t,text);
+    lv_obj_set_y(t,-10);
     lv_obj_set_align(t,LV_ALIGN_BOTTOM_MID);
 
-    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
-    lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-    return arc;
+    return Meter;
 }
 void Net_UpDownload_box(lv_obj_t * obj){
     lv_obj_t * UpdownBox = lv_obj_create(obj);
@@ -232,9 +275,9 @@ void Network_Charts(lv_obj_t* obj)
     ser2 = lv_chart_add_series(net_chart, lv_color_hex(0xFFFB7D), LV_CHART_AXIS_SECONDARY_Y);
 
 }
-void Content_Update(lv_obj_t * obj,float value){
-    lv_arc_set_value(obj,(int16_t)value);
-    lv_label_set_text_fmt(lv_obj_get_child(obj,0),"%d %%",(int16_t)value);
+void Content_Update(lv_obj_t * obj,lv_meter_indicator_t* indic,int16_t value){
+    lv_meter_set_indicator_end_value(obj,indic, value);
+    lv_label_set_text_fmt(lv_obj_get_child(obj,0),"%d %%",value);
 }
 
 float NetworkSpeed(int32_t bytes) {
@@ -245,32 +288,40 @@ float NetworkSpeed(int32_t bytes) {
     } 
 }
 void SpeedSymbol(int32_t v1,int32_t v2){
+    bool a = false;
     if ( v1 && v2 < 1024 * 1024  ){
         lv_label_set_text(mask,"#85FFBD KB# #FFFFFF |# #FFFB7D KB#");
     }
     else if ( v1 >= 1024 * 1024  && v2 >= 1024 * 1024)
     {
         lv_label_set_text(mask,"#85FFBD MB# #FFFFFF |# #FFFB7D MB#");
+        a = true;
     }
     else if ( v1  > 1024 * 1024 && v2 < 1024 * 1024)
     {
         lv_label_set_text(mask,"#85FFBD MB# #FFFFFF |# #FFFB7D KB#");
+        a = true;
     }
     else if ( v1  < 1024 * 1024 && v2 > 1024 * 1024)
     {
         lv_label_set_text(mask,"#85FFBD KB# #FFFFFF |# #FFFB7D MB#");
+        a = true;
     }
+    if (a){
+        lv_chart_set_next_value(net_chart, ser1,int32_t(v1/1000.0 * 1000.0));
+        lv_chart_set_next_value(net_chart, ser2,int32_t(v2/1000.0 * 1000.0));
+    }else{
+        lv_chart_set_next_value(net_chart, ser1,int32_t(v1/1000.0));
+        lv_chart_set_next_value(net_chart, ser2,int32_t(v2/1000.0));
+    }
+
 }
 void Net_Update(lv_obj_t * net1,lv_obj_t * net2,int32_t value1,int32_t value2){
     
     SpeedSymbol(value1,value2);
-    float Up   = NetworkSpeed(value1);
-    float Down = NetworkSpeed(value2);
-    lv_label_set_text_fmt(net1,"%.2f",Up); //Upload
-    lv_chart_set_next_value(net_chart, ser1,(int16_t)Up);
-
-    lv_label_set_text_fmt(net2,"%.2f",Down); //Download
-    lv_chart_set_next_value(net_chart, ser2,(int16_t)Down);   
+    lv_label_set_text_fmt(net1,"%.2f",NetworkSpeed(value1)); //Upload
+    lv_label_set_text_fmt(net2,"%.2f",NetworkSpeed(value2)); //Download
+ 
 
 }
 
@@ -300,7 +351,8 @@ static void CPU_Net_RAM_Json(String Json){
     JsonObject hosts_0 = doc["data"]["hosts"][0];
     SystemInfo.CPUUse  = hosts_0["cpu_usage"];
     SystemInfo.RAMUse  = hosts_0["ram_usage"];
-    printf("CPU:%d, RAM:%d\n",SystemInfo.CPUUse,SystemInfo.RAMUse);
+    
+    printf("\nCPU:%d, RAM:%d\n",SystemInfo.CPUUse,SystemInfo.RAMUse);
     int i =0;
     SystemInfo.Upload = 0,
     SystemInfo.Downlaod = 0;
@@ -325,7 +377,7 @@ static String HttpGetJson(String url){
     int code = http.GET();
     if ( code == HTTP_CODE_OK){
         String json = http.getString();
-        // printf("Json:%s",json.c_str());
+        printf("Json:%s",json.c_str());
         return json;
     }else{
         http.end();
@@ -362,6 +414,7 @@ static void ui_event_SyPad(lv_event_t * e)
 //-----------------------Task-------------------
 void RequestTask(void *arg)
 {
+    
     TaskStatus.TaskOnWork = true;
     while (true)
     {
@@ -376,12 +429,18 @@ void RequestTask(void *arg)
         }
         vTaskDelay(APIUpdateTime);
     }
+    TaskStatus.TaskOnWork = false;
     vTaskDelete(API_Update_Task);
 }
 static void Info_update(lv_timer_t * timer){
-    
-    Content_Update(CPULabel,SystemInfo.CPUUse);
-    Content_Update(RAMLabel,SystemInfo.RAMUse);
+    static char label_buffer[10];
+    static I2C_BM8563_TimeTypeDef rtc_time;
+    static int16_t hours, minutes, seconds;
+    device->Rtc.getTime(&rtc_time);
+    snprintf(label_buffer, 10, "%02d:%02d", rtc_time.hours, rtc_time.minutes);
+    lv_label_set_text(TimeLabel, label_buffer);
+    Content_Update(Meter1.METER,Meter1.INDIC,SystemInfo.CPUUse);
+    Content_Update(Meter2.METER,Meter2.INDIC,SystemInfo.RAMUse);
     Net_Update(Uplabel,Downlabel,SystemInfo.Upload,SystemInfo.Downlaod);
 }
 //-----------------------Task-------------------
@@ -395,12 +454,18 @@ void ScreenMain(){
     lv_obj_set_height(ui_SyPageMain,240);
     lv_obj_set_style_bg_opa(ui_SyPageMain, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_align(ui_SyPageMain, LV_ALIGN_CENTER);
-    CPULabel = ArcCreate(ui_SyPageMain,"CPU",1,2);
-    RAMLabel = ArcCreate(ui_SyPageMain,"RAM",1,132);
+    Meter1 = ArcCreate(ui_SyPageMain,"CPU",1,-2);
+    Meter2 = ArcCreate(ui_SyPageMain,"RAM",1,135);
     Network_Charts(ui_SyPageMain);
     Net_UpDownload_box(ui_SyPageMain);
+    TimeLabel = lv_label_create(ui_SyPageMain);
+    lv_obj_set_align(TimeLabel,LV_ALIGN_TOP_MID);
+    lv_obj_set_style_text_font(TimeLabel,Ubuntu18,0);
+    lv_label_set_text(TimeLabel,"Init...");
+    lv_obj_set_style_text_opa(TimeLabel,80,0);
     
 }
+
 void ScreenSec(){
     ui_SyPageSec = lv_obj_create(NULL);
     lv_obj_clear_flag(ui_SyPageSec, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
@@ -410,14 +475,35 @@ void ScreenSec(){
     lv_obj_set_style_bg_opa(ui_SyPageSec, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_align(ui_SyPageSec, LV_ALIGN_CENTER);
 
-    lv_obj_t * arc = lv_arc_create(ui_SyPageSec);
-    lv_obj_set_size(arc, 150, 150);
-    lv_arc_set_rotation(arc, 135);
-    lv_arc_set_bg_angles(arc, 0, 270);
-    lv_arc_set_value(arc, 40);
-    lv_obj_center(arc);
+    lv_obj_t * lmeter = lv_meter_create(ui_SyPageSec);
+    lv_obj_remove_style(lmeter, NULL, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(lmeter, 0, 0);
+    lv_obj_set_style_border_opa(lmeter, 0, 0);
+    lv_obj_set_style_radius(lmeter,1,0);
+    lv_meter_scale_t* scale_min1 = lv_meter_add_scale(lmeter);
+    lv_obj_set_size(lmeter, 150, 150);
+    lv_obj_set_pos(lmeter, 0, 0);
+
+    lv_meter_set_scale_ticks(lmeter, scale_min1, 50, 2, 10, lv_color_hex(0x85FFBD));
+    lv_meter_set_scale_range(lmeter, scale_min1, 0, 100, 270, 135);
+
+    lv_meter_indicator_t* indic;
+    indic = lv_meter_add_scale_lines(lmeter, scale_min1, lv_color_hex(0x85FFBD), lv_color_hex(0xFF7F3B),false,0);
+    lv_meter_set_indicator_end_value(lmeter, (lv_meter_indicator_t*)indic, 3);
+    lv_obj_set_align(lmeter,LV_ALIGN_TOP_LEFT);
+    lv_obj_set_x(lmeter,50);
+    lv_obj_set_y(lmeter,-3);
+    
+
+    // lv_obj_t * arc = lv_arc_create(ui_SyPageSec);
+    // lv_obj_set_size(arc, 150, 150);
+    // lv_arc_set_rotation(arc, 135);
+    // lv_arc_set_bg_angles(arc, 0, 270);
+    // lv_arc_set_value(arc, 40);
+    // lv_obj_center(arc);
     
 }
+
 void ScreenInit(){
     ScreenMain();
     ScreenSec();

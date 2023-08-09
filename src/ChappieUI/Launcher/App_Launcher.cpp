@@ -122,6 +122,8 @@ namespace App {
         /* Create a timer to update time */
         _time_update_timer = lv_timer_create(time_update, UpdataBarTime, (void*)_device);
         time_update(_time_update_timer);     // status bar time update
+
+        
         _ntp_update_timer = lv_timer_create(ntp_update, UpdataNtpTime, (void*)_device);
         time_update(_ntp_update_timer);     // status bar time update
 
@@ -141,6 +143,7 @@ namespace App {
         
         _device_status.isInTimeDisplay=false;
         _device->lvgl.enable();
+        
     }
 
 
