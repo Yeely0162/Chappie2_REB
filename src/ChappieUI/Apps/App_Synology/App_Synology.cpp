@@ -19,23 +19,22 @@ static WiFiClient client;
 struct MeterInfo{
     lv_obj_t * METER;
     lv_meter_indicator_t* INDIC;
+    int32_t Meter_val_old = 0;
 };
 static MeterInfo Meter1,Meter2,Meter;
 
 static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x);
 
-
-
 struct SynologyConfig{
   int16_t SSHPort= 22;
-  String  User  = "XXXX";
-  String  Password  = "XXXX";
+  String  User  = "Chappie";
+  String  Password  = "uUYVG<4n";
   String  Sid;
   bool  SidStatus = false;
-  String SidAPI = "http://XXXXX:80/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
-  String CPUAPI = ("http://XXXXXX:80/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
-  String LogoutAPI = ("http://XXXXX:80/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
-  String StorageAPI = ("http://XXXXX:80/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
+  String SidAPI = "http://192.168.0.8:20203/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
+  String CPUAPI = ("http://192.168.0.8:20203/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
+  String LogoutAPI = ("http://192.168.0.8:20203/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
+  String StorageAPI = ("http://192.168.0.8:20203/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
 }SyConfig;
 struct SynologyInfo{
     const char *  ServerName = "";
@@ -98,6 +97,14 @@ static std::array<_lv_obj_t**, 2> SynologyPad_List = {
 //     lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
 //     return arc;
 // }
+static void set_meter_cpu_value(void* indic, int32_t v)
+{
+    lv_meter_set_indicator_end_value(Meter1.METER,Meter1.INDIC, v);
+}
+static void set_meter_ram_value(void* indic, int32_t v)
+{
+    lv_meter_set_indicator_end_value(Meter2.METER,Meter2.INDIC, v);
+}
 static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
     Meter.METER = lv_meter_create(obj);
     lv_obj_remove_style(Meter.METER, NULL, LV_PART_INDICATOR);
@@ -129,7 +136,7 @@ static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x)
     lv_label_set_text(t,text);
     lv_obj_set_y(t,-10);
     lv_obj_set_align(t,LV_ALIGN_BOTTOM_MID);
-
+    
     return Meter;
 }
 void Net_UpDownload_box(lv_obj_t * obj){
@@ -277,9 +284,37 @@ void Network_Charts(lv_obj_t* obj)
     ser2 = lv_chart_add_series(net_chart, lv_color_hex(0xFFFB7D), LV_CHART_AXIS_SECONDARY_Y);
 
 }
-void Content_Update(lv_obj_t * obj,lv_meter_indicator_t* indic,int16_t value){
-    lv_meter_set_indicator_end_value(obj,indic, value);
-    lv_label_set_text_fmt(lv_obj_get_child(obj,0),"%d %%",value);
+
+void Content_Update(MeterInfo meterobj,int16_t value,bool check){
+    lv_anim_t anim;
+     int val_old = meterobj.Meter_val_old;
+    lv_anim_init(&anim);
+    if (check){
+        lv_anim_set_exec_cb(&anim, set_meter_cpu_value);
+    }else{
+        lv_anim_set_exec_cb(&anim, set_meter_ram_value);
+    }
+
+    if(val_old == 0){
+        
+        lv_anim_set_values(&anim, 0, value);
+
+    }else if (val_old > value){
+
+        lv_anim_set_values(&anim, value, val_old);
+    
+    }else if (val_old < value){
+
+        lv_anim_set_values(&anim, val_old, value);
+    
+    }
+    
+    lv_anim_set_time(&anim, 200); /*2 sec for 1 turn of the minute hand (1 hour)*/
+    lv_anim_set_var(&anim, meterobj.INDIC);
+    lv_anim_start(&anim);
+
+    // lv_meter_set_indicator_end_value(obj,indic, value);
+    lv_label_set_text_fmt(lv_obj_get_child(meterobj.METER,0),"%d %%",value);
 }
 
 float NetworkSpeed(int32_t bytes) {
@@ -441,8 +476,8 @@ static void Info_update(lv_timer_t * timer){
     device->Rtc.getTime(&rtc_time);
     snprintf(label_buffer, 10, "%02d:%02d", rtc_time.hours, rtc_time.minutes);
     lv_label_set_text(TimeLabel, label_buffer);
-    Content_Update(Meter1.METER,Meter1.INDIC,SystemInfo.CPUUse);
-    Content_Update(Meter2.METER,Meter2.INDIC,SystemInfo.RAMUse);
+    Content_Update(Meter1,SystemInfo.CPUUse,true);
+    Content_Update(Meter2,SystemInfo.RAMUse,false);
     Net_Update(Uplabel,Downlabel,SystemInfo.Upload,SystemInfo.Downlaod);
 }
 //-----------------------Task-------------------
