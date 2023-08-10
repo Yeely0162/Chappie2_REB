@@ -300,12 +300,13 @@ namespace App {
             // hide wifi icon
             lv_obj_add_flag(ui_WifiBar, LV_OBJ_FLAG_HIDDEN); // hide flag
         }
-
-        if (device->Pow.isCharing()){
-            lv_obj_clear_flag(ui_CharingFlash, LV_OBJ_FLAG_HIDDEN); // hide flag    
-        }else{
-            lv_obj_add_flag(ui_CharingFlash, LV_OBJ_FLAG_HIDDEN);
-        }
+        #if AXPManage
+            if (device->Pow.isCharing()){
+                lv_obj_clear_flag(ui_CharingFlash, LV_OBJ_FLAG_HIDDEN); // hide flag    
+            }else{
+                lv_obj_add_flag(ui_CharingFlash, LV_OBJ_FLAG_HIDDEN);
+            }
+        #endif
     }
 
 

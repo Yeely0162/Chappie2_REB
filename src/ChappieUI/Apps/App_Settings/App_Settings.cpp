@@ -63,11 +63,13 @@ void Status_update(lv_timer_t * timer)
     Content_Update(wifiInfo.WiFi_Name,device->Wf.WiFiN());
     Content_Update(wifiInfo.Mac,device->Wf.WiFiMac());
     //power page
-    Content_Update(powInfo.AXPTemp,(device->Pow.AXP173Temp()+"C").c_str());
-    Content_Update(powInfo.BatCurr,(device->Pow.BatCurrent()+"mA").c_str());
-    Content_Update(powInfo.BatPower,(device->Pow.BatPower()+"mW").c_str());
-    Content_Update(powInfo.BatVolt,(device->Pow.BatVoltage()+"V").c_str());
-    Content_Update(powInfo.USBCharing,device->Pow.isCharing() ? "Charing" : "Discharge");
+    #if AXPManage
+        Content_Update(powInfo.AXPTemp,(device->Pow.AXP173Temp()+"C").c_str());
+        Content_Update(powInfo.BatCurr,(device->Pow.BatCurrent()+"mA").c_str());
+        Content_Update(powInfo.BatPower,(device->Pow.BatPower()+"mW").c_str());
+        Content_Update(powInfo.BatVolt,(device->Pow.BatVoltage()+"V").c_str());
+        Content_Update(powInfo.USBCharing,device->Pow.isCharing() ? "Charing" : "Discharge");
+    #endif
 }
 
 
@@ -143,13 +145,19 @@ void SettingPage(void)
     lv_obj_set_style_pad_hor(sub_battery_page, lv_obj_get_style_pad_left(lv_menu_get_main_header(menu), 0), 0);
     lv_menu_separator_create(sub_battery_page);
     section = lv_menu_section_create(sub_battery_page);
-    ContentBox(section," ","AXP173 Information",true,0,150); 
-    powInfo.AXPTemp = ContentBox(section,"Temp:",device->Pow.AXP173Temp().c_str(),true,0,-1);
-    powInfo.BatVolt = ContentBox(section,"BatVolt:",device->Pow.BatVoltage().c_str(),true,0,-1);
-    powInfo.BatCurr = ContentBox(section,"BatCurr:",device->Pow.BatCurrent().c_str(),true,0,-1);
-    powInfo.BatPower = ContentBox(section,"Power:",device->Pow.BatCurrent().c_str(),true,0,-1);
-    ContentBox(section,"BatExitst:",device->Pow.isChargedBat() ? "EXIST" : "NO",true,0,-1);
-    powInfo.USBCharing = ContentBox(section,"USB:",device->Pow.isCharing() ? "Charing" : "Discharge",true,0,-1);
+    ContentBox(section," ","AXP173 Information",true,0,150);
+    #if AXPManage 
+        powInfo.AXPTemp = ContentBox(section,"Temp:",device->Pow.AXP173Temp().c_str(),true,0,-1);
+        powInfo.BatVolt = ContentBox(section,"BatVolt:",device->Pow.BatVoltage().c_str(),true,0,-1);
+        powInfo.BatCurr = ContentBox(section,"BatCurr:",device->Pow.BatCurrent().c_str(),true,0,-1);
+        powInfo.BatPower = ContentBox(section,"Power:",device->Pow.BatCurrent().c_str(),true,0,-1);
+        ContentBox(section,"BatExitst:",device->Pow.isChargedBat() ? "EXIST" : "NO",true,0,-1);
+        powInfo.USBCharing = ContentBox(section,"USB:",device->Pow.isCharing() ? "Charing" : "Discharge",true,0,-1);
+    #endif
+    #if IP5Manage
+        ContentBox(section,"IP5Manage","With NON ",true,0,-1);
+    #endif
+    
 
 
     // lv_obj_add_event_cb(lv_obj_get_child(lv_obj_get_child(LV_m,));

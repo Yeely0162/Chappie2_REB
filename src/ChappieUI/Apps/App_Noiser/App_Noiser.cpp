@@ -216,9 +216,6 @@ void Noiser_update(lv_timer_t * timer)
     static char decibel_buffer[8];
     snprintf(decibel_buffer, 8,"%d",soundLevel);
     lv_label_set_text(decibel, decibel_buffer);
-    
-
-
 }
 void Noiser_deinit()
 {

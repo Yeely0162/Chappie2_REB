@@ -97,10 +97,7 @@ class ChappiePower {
                 pmu.powerOFF();
             #endif
         }
-        inline bool isCharing()
-        {   
-            return pmu.isCharging();
-        }
+        
         inline float readBatVoltage()
         {
             /* Calculate the real bat voltage */
@@ -112,6 +109,10 @@ class ChappiePower {
             #endif
         }
     #if AXPManage
+        inline bool isCharing()
+        {   
+            return pmu.isCharging();
+        }
         inline String AXP173Temp()
         {
             /* Calculate the real bat voltage */

@@ -15,11 +15,12 @@ static int SidJson(String Json);
 static void CPU_Net_RAM_Json(String Json);
 static String HttpGetJson(String url);
 static TaskHandle_t  API_Update_Task;
+static lv_anim_t anim;
 static WiFiClient client;
 struct MeterInfo{
     lv_obj_t * METER;
     lv_meter_indicator_t* INDIC;
-    int32_t Meter_val_old = 0;
+    int16_t Meter_val_old = 0;
 };
 static MeterInfo Meter1,Meter2,Meter;
 
@@ -65,8 +66,16 @@ static std::array<_lv_obj_t**, 2> SynologyPad_List = {
 };
 
 
-// animation
-
+//-------------animation---------------
+static void set_meter_cpu_value(void* indic, int32_t v)
+{
+    lv_meter_set_indicator_end_value(Meter1.METER,Meter1.INDIC, v);
+}
+static void set_meter_ram_value(void* indic, int32_t v)
+{
+    lv_meter_set_indicator_end_value(Meter2.METER,Meter2.INDIC, v);
+}
+//-------------animation---------------
 
 //--------------page Main style-------------------
 // lv_obj_t * ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
@@ -97,14 +106,7 @@ static std::array<_lv_obj_t**, 2> SynologyPad_List = {
 //     lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
 //     return arc;
 // }
-static void set_meter_cpu_value(void* indic, int32_t v)
-{
-    lv_meter_set_indicator_end_value(Meter1.METER,Meter1.INDIC, v);
-}
-static void set_meter_ram_value(void* indic, int32_t v)
-{
-    lv_meter_set_indicator_end_value(Meter2.METER,Meter2.INDIC, v);
-}
+
 static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
     Meter.METER = lv_meter_create(obj);
     lv_obj_remove_style(Meter.METER, NULL, LV_PART_INDICATOR);
@@ -285,36 +287,23 @@ void Network_Charts(lv_obj_t* obj)
 
 }
 
-void Content_Update(MeterInfo meterobj,int16_t value,bool check){
-    lv_anim_t anim;
-     int val_old = meterobj.Meter_val_old;
+void Content_Update(MeterInfo *meterobj,int16_t value,bool check){
+    
     lv_anim_init(&anim);
+
     if (check){
         lv_anim_set_exec_cb(&anim, set_meter_cpu_value);
     }else{
         lv_anim_set_exec_cb(&anim, set_meter_ram_value);
     }
 
-    if(val_old == 0){
-        
-        lv_anim_set_values(&anim, 0, value);
-
-    }else if (val_old > value){
-
-        lv_anim_set_values(&anim, value, val_old);
-    
-    }else if (val_old < value){
-
-        lv_anim_set_values(&anim, val_old, value);
-    
-    }
-    
-    lv_anim_set_time(&anim, 200); /*2 sec for 1 turn of the minute hand (1 hour)*/
-    lv_anim_set_var(&anim, meterobj.INDIC);
+    lv_anim_set_values(&anim, meterobj->Meter_val_old, value);
+    lv_anim_set_time(&anim, 800); /*2 sec for 1 turn of the minute hand (1 hour)*/
+    lv_anim_set_var(&anim, meterobj->INDIC);
     lv_anim_start(&anim);
-
-    // lv_meter_set_indicator_end_value(obj,indic, value);
-    lv_label_set_text_fmt(lv_obj_get_child(meterobj.METER,0),"%d %%",value);
+    lv_anim_set_path_cb(&anim,lv_anim_path_ease_in_out);
+    lv_label_set_text_fmt(lv_obj_get_child(meterobj->METER,0),"%d %%",value);
+    meterobj->Meter_val_old = value;
 }
 
 float NetworkSpeed(int32_t bytes) {
@@ -476,8 +465,8 @@ static void Info_update(lv_timer_t * timer){
     device->Rtc.getTime(&rtc_time);
     snprintf(label_buffer, 10, "%02d:%02d", rtc_time.hours, rtc_time.minutes);
     lv_label_set_text(TimeLabel, label_buffer);
-    Content_Update(Meter1,SystemInfo.CPUUse,true);
-    Content_Update(Meter2,SystemInfo.RAMUse,false);
+    Content_Update(&Meter1,SystemInfo.CPUUse,true);
+    Content_Update(&Meter2,SystemInfo.RAMUse,false);
     Net_Update(Uplabel,Downlabel,SystemInfo.Upload,SystemInfo.Downlaod);
 }
 //-----------------------Task-------------------
@@ -499,7 +488,8 @@ void ScreenMain(){
     lv_obj_set_align(TimeLabel,LV_ALIGN_TOP_MID);
     lv_obj_set_style_text_font(TimeLabel,Ubuntu18,0);
     lv_label_set_text(TimeLabel,"Init...");
-    lv_obj_set_style_text_opa(TimeLabel,80,0);
+    lv_obj_set_style_text_color(TimeLabel,lv_color_hex(0x8F8F8F),0);
+    // lv_obj_set_style_text_opa(TimeLabel,180,0);
     
 }
 
@@ -608,7 +598,7 @@ namespace App {
 
         _Info_update = lv_timer_create(Info_update, APIUpdateTime + 500,NULL);
         Info_update(_Info_update);     // status bar time update
-        xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 4,NULL, 1, &API_Update_Task, 1 );
+        xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 3,NULL, 5, &API_Update_Task, 1 );
         // switch (code)
         // {
         //     case 0:
@@ -665,7 +655,6 @@ namespace App {
         UserLogout();
         lv_timer_del(_Info_update);
         vTaskDelete(API_Update_Task);
-        
     }
 
 
