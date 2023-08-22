@@ -12,8 +12,8 @@ ConfigWiFi::ConfigWiFi() : wifiEnabled(false) {}
 bool OnAP = false;
 void InitWiFi(){
    prefs.begin("WiFiAP");//在Preferences中命名空间和键名均为字符串，并且长度不大于15个字节 大于可能无法打开命名空间
-   WiFi_Name = prefs.getString("WiFiName");//倒数
-   WiFi_Pass = prefs.getString("WiFiPass");//光上下变换值
+   WiFi_Name = prefs.getString("WiFiName");//wifi名字
+   WiFi_Pass = prefs.getString("WiFiPass");//wifi密码
    WiFi_LOG("WiFi N:%s WiFi P:%s",WiFi_Name,WiFi_Pass);
    prefs.end();
 }
@@ -25,8 +25,8 @@ void setWiFi(String w ,String p){
     prefs.begin("WiFiAP");
     prefs.putString("WiFiName",w);//默认值
     prefs.putString("WiFiPass",p);//默认值
-    WiFi_Name = prefs.getString("WiFiName");//倒数
-    WiFi_Pass = prefs.getString("WiFiPass");//光上下变换值
+    WiFi_Name = prefs.getString("WiFiName");
+    WiFi_Pass = prefs.getString("WiFiPass");
     WiFi_LOG("WiFi N:%s \nWiFi P:%s \n",WiFi_Name,WiFi_Pass);
     prefs.end();
 }
@@ -70,7 +70,7 @@ const char * ConfigWiFi::WiFiN(){
 void ConfigWiFi::Init(){
     WiFi.hostname(HOST_NAME);
     InitWiFi();
-    
+    WiFi.enableIpV6();
 }
 bool ConfigWiFi::APClose(){
     server.close();
@@ -88,6 +88,7 @@ void ConfigWiFi::enableWiFi() {
     } else {
         wifiEnabled = true;
         WiFi.begin(WiFi_Name.c_str(),WiFi_Pass.c_str());
+        
         
     }
 }
@@ -118,11 +119,7 @@ String ConfigWiFi::GateWay () {
 const char * ConfigWiFi::WiFiMac () {
     return (WiFi.status() == WL_CONNECTED) ? WiFi.macAddress().c_str(): "None";
 }
-// const char * StringToChar(String st,char *format){
-//     static char buffer[sizeof(st)];
-//     snprintf(buffer, sizeof(buffer), format,st);
-//     return buffer;
-// }
+
 void ConfigWiFi::WiFiloop() {
     if (OnAP){
         server.handleClient();
