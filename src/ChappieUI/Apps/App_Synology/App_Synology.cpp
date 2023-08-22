@@ -36,15 +36,15 @@ lv_obj_t * InfoBox;
 //---------page2 define-----------
 struct SynologyConfig{
   int16_t SSHPort= 22;
-  String  User  = "Chappie";
-  String  Password  = "uUYVG<4n";
+  String  User  = "XXXXXXXXXXX";
+  String  Password  = "XXXXXXXXXX";
   String  Sid;
   bool  SidStatus = false;
-  String SidAPI = "https://dsm.yeely.top:1666/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
-  String CPUAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
-  String LogoutAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
-  String StorageAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
-  String SystemInfoAPI = "https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Core.System&method=info&version=3&_sid=";
+  String SidAPI = "https://XXXXXXXXXXXXXX/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
+  String CPUAPI = ("https://XXXXXXXXXXXXXXXXX/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
+  String LogoutAPI = ("https://XXXXXXXXXXXXXXXXX/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
+  String StorageAPI = ("https://XXXXXXXXXXXXXXXX/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
+  String SystemInfoAPI = "https://XXXXXXXXXXXXXXXXXXXX/webapi/entry.cgi?api=SYNO.Core.System&method=info&version=3&_sid=";
 }SyConfig;
 struct SynologyInfo{
     String ServerName  = "non";
@@ -370,60 +370,9 @@ void Net_Update(lv_obj_t * net1,lv_obj_t * net2,int32_t value1,int32_t value2){
 
 }
 
-const char *StorageVolumeCal(uint64_t vol) {
-    float volume = vol / 1024.0 * 1024.0;
-    static char buffer[10];
-    if(volume >= 1024){ // MB
-        if((volume /=1024.0) >= 1024){//GB
-            if((volume/=1024.0) >= 1024){//TB
-                snprintf(buffer, 10, "%.2fTB",(volume/=1024.0));
-            }
-            snprintf(buffer, 10, "%.2fGB",(volume/=1024.0));
-        }
-        else{
-            snprintf(buffer, 10, "%.2fMB",volume);
-        }
-    }
-    else{
-        snprintf(buffer, 10, "%.2fKB",volume);
-    }
-    return buffer;
-}
-void StorageLabelUpdate(lv_obj_t * volume, int select){
-    // lv_label_set_text()
-    float value = (float(SystemInfo.Volume[select][1]) / SystemInfo.Volume[select][0]) * 100;
-    printf("\nvolValue1:%d",value);
 
-    lv_bar_set_value(lv_obj_get_child(volume,1),(int)value, LV_ANIM_OFF);
-    lv_label_set_text(lv_obj_get_child(volume,2),SystemInfo.StorageName[select].c_str());
 
-    static char label_buffer[14];
-    snprintf(label_buffer, 14, "%s|%s", StorageVolumeCal(SystemInfo.Volume[select][1]), StorageVolumeCal(SystemInfo.Volume[select][0]));
-    lv_label_set_text(lv_obj_get_child(volume,3),label_buffer);
-    lv_label_set_text_fmt(lv_obj_get_child(volume,4),"%.1f%%",value); 
 
-}
-void SystemInfoBox(lv_obj_t * Info,String text,String smalltitle2,bool isDot){
-    // lv_label_set_text()
-    if (smalltitle2 != NULL || "NULL"){
-        lv_label_set_text(lv_obj_get_child(Info,1),smalltitle2.c_str());
-    }
-    
-    lv_label_set_text(lv_obj_get_child(Info,2),text.c_str());
-    
-
-}
-void SystemInfoBox(lv_obj_t * Info,int value,int select,String format,bool isDot){
-    // lv_label_set_text()
-    if(isDot){
-        
-    }else{
-        
-    }
-    lv_label_set_text_fmt(lv_obj_get_child(Info,select),format.c_str(),value);
-    
-
-}
 //--------------page Main style-------------------
 
 //-----------------------Function-------------------
@@ -591,14 +540,7 @@ void Info_update(lv_timer_t * timer){
         Content_Update(&Meter2,SystemInfo.RAMUse,false);
         Net_Update(Uplabel,Downlabel,SystemInfo.Upload,SystemInfo.Downlaod);
     }else if(SynologyPad_Current == 1){
-        StorageLabelUpdate(Volume1,0);
-        StorageLabelUpdate(Volume2,1);
-        SystemInfoBox(CpuBOX,SystemInfo.CPUType,String(SystemInfo.CPUCoreNum),false);
-        SystemInfoBox(DeviceBOX,SystemInfo.DeviceName,"T",false);
-        SystemInfoBox(RamBOX,SystemInfo.RAMGB / 1024.0,1,"%d G",false);
-        SystemInfoBox(TempBox,SystemInfo.SystemTemp,1,"%d C",true);
-        SystemInfoBox(WorkBox,SystemInfo.UpTime,"Time",false);
-        // SystemInfoBox(TempBox,SystemInfo.RAMGB/1024,"%d G",false);
+
     }
     
 }
@@ -628,123 +570,11 @@ void ScreenMain(){
 }
 
 
-lv_obj_t * StorageView(lv_obj_t * obj,const char * diskName,const char * StorageLabel,int32_t value){
-    lv_obj_t * StorageSMBox = lv_obj_create(obj);
-    lv_obj_set_size(StorageSMBox,245,65);
-    lv_obj_set_style_bg_color(StorageSMBox, lv_color_hex(0x53DE77), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(StorageSMBox, 0,0);
-    lv_obj_set_style_radius(StorageSMBox, 5,0);
-    lv_obj_set_style_pad_all(StorageSMBox,0,0);
-    lv_obj_set_style_bg_opa(StorageSMBox,20,0);
 
-    lv_obj_t *img = lv_img_create(StorageSMBox);//0 child
-    lv_obj_align(img,LV_ALIGN_LEFT_MID,5,0);
-    lv_img_set_src(img,ResourcePool::GetImage("disk_green"));
 
-    lv_obj_t * Storagebar = lv_bar_create(StorageSMBox); //1
-    lv_obj_set_size(Storagebar, 170, 10);
-    lv_obj_align(Storagebar,LV_ALIGN_CENTER,15,0);
-    lv_bar_set_value(Storagebar, value, LV_ANIM_OFF);
-
-    lv_obj_t * dn = lv_label_create(StorageSMBox);//2
-    lv_obj_set_align(dn,LV_ALIGN_TOP_MID);
-    lv_obj_set_style_text_font(dn,Font12,0);
-    lv_label_set_text(dn,diskName);
-    lv_obj_set_style_text_color(dn,lv_color_hex(0xACACAC),0);
-
-    lv_obj_t * SgLabel = lv_label_create(StorageSMBox);//3
-    lv_obj_align(SgLabel,LV_ALIGN_BOTTOM_MID,0,0);
-    lv_obj_set_style_text_font(SgLabel,Font12,0);
-    lv_label_set_text(SgLabel,StorageLabel);
-    lv_obj_set_style_text_color(SgLabel,lv_color_hex(0xACACAC),0);
-
-    lv_obj_t * SgPercentLabel = lv_label_create(StorageSMBox);//4
-    lv_obj_align(SgPercentLabel,LV_ALIGN_BOTTOM_RIGHT,-15,0);
-    lv_obj_set_style_text_font(SgPercentLabel,Font12,0);
-    lv_label_set_text_fmt(SgPercentLabel,"%d%%",value);
-    lv_obj_set_style_text_color(SgPercentLabel,lv_color_hex(0xACACAC),0);
-    return StorageSMBox;
-}
-lv_obj_t * Ser_Status_Box(lv_obj_t * obj,const char * smalltitle1,const char * smalltitle2,const char *content,bool isDot){
-    lv_obj_t * IFBox = lv_obj_create(obj);
-    lv_obj_set_size(IFBox,130,60);
-    lv_obj_clear_flag(IFBox, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_opa(IFBox, 0,0);
-    lv_obj_set_style_radius(IFBox,8,0);
-    lv_obj_set_style_pad_all(IFBox,0,0);
-    lv_obj_set_style_bg_color(IFBox, lv_color_hex(0x85FFBD), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(IFBox, 30,0);
-    if(isDot){
-        lv_obj_t * dot = lv_obj_create(IFBox);//0
-        lv_obj_set_size(dot, 15, 15);
-        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-        lv_obj_align(dot,LV_ALIGN_LEFT_MID,10,0);
-        lv_obj_set_style_bg_color(dot, lv_color_hex(0x53DE77), LV_STATE_DEFAULT);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_opa(dot, 0,0);
-    }else{
-        lv_obj_t * st = lv_label_create(IFBox);//0
-        lv_obj_align(st,LV_ALIGN_TOP_LEFT,2,2);
-        lv_obj_set_style_text_font(st,Font12,0);
-        lv_label_set_text_static(st,smalltitle1);
-        lv_obj_set_style_text_color(st,lv_color_hex(0x53DE77),0);
-    }
-    if(smalltitle2 != NULL){
-        lv_obj_t * st2 = lv_label_create(IFBox);//1
-        lv_obj_set_align(st2,LV_ALIGN_TOP_RIGHT);
-        lv_obj_set_style_text_font(st2,Font12,0);
-        lv_label_set_text(st2,smalltitle2);
-        lv_obj_set_style_text_color(st2,lv_color_hex(0x53DE77),0);
-    }
-    lv_obj_t * con = lv_label_create(IFBox);//2
-    lv_obj_set_align(con,LV_ALIGN_CENTER);
-    lv_label_set_text(con,content);
-    lv_obj_set_style_text_font(con,Font24,0);
-    lv_obj_set_style_text_color(con,lv_color_hex(0x53DE77),0);
-    return IFBox;
-}
 
 void ScreenSec(){
-    ui_SyPageSec = lv_obj_create(NULL);
-    lv_obj_clear_flag(ui_SyPageSec, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_SyPageSec, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_width(ui_SyPageSec,280);
-    lv_obj_set_height(ui_SyPageSec,240);
-    lv_obj_set_style_bg_opa(ui_SyPageSec, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    // lv_obj_set_align(ui_SyPageSec, LV_ALIGN_CENTER);
-    lv_obj_set_flex_flow(ui_SyPageSec, LV_FLEX_FLOW_COLUMN);
-
-    lv_obj_t * StorageBox = lv_obj_create(ui_SyPageSec);
-    lv_obj_set_size(StorageBox,280,85);
-    lv_obj_set_flex_flow(StorageBox, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_bg_color(StorageBox, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(StorageBox, 60,0);
-    lv_obj_set_style_border_opa(StorageBox, 0,0);
-    lv_obj_set_style_radius(StorageBox, 0,0);
-
-    Volume1 = StorageView(StorageBox,"volume_1","1.6TB/2.7TB",80);
-    Volume2 = StorageView(StorageBox,"volume_2","1.6GB/2.7GB",20);
-
-    //big box
-    InfoBox = lv_obj_create(ui_SyPageSec);
-    lv_obj_set_width(InfoBox,280);
-    lv_obj_set_height(InfoBox,150);
-    lv_obj_set_style_pad_all(InfoBox,0,0);
-    lv_obj_set_style_bg_color(InfoBox, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_add_flag(InfoBox, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_flex_flow(InfoBox, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_border_opa(InfoBox, 0,0);
     
-    DeviceBOX = Ser_Status_Box(InfoBox,"DSM","Name","non",false);
-    CpuBOX = Ser_Status_Box(InfoBox,"CPU","4","non",false);
-    RamBOX = Ser_Status_Box(InfoBox,"RAM",NULL,"non",false);
-    TempBox= Ser_Status_Box(InfoBox,"Temp",NULL,"non",true);
-    WorkBox= Ser_Status_Box(InfoBox,"Up","Time","10Day:12Hour",false);
-    // WorkingTimeLabel = lv_label_create(ui_SyPageSec);
-    // lv_obj_set_align(WorkingTimeLabel,LV_ALIGN_BOTTOM_MID);
-    // lv_obj_set_style_text_font(WorkingTimeLabel,Font12,0);
-    // lv_label_set_text(WorkingTimeLabel,"100 Day 10 Hor");
-    // lv_obj_set_style_text_color(WorkingTimeLabel,lv_color_hex(0x9C9C9C),0);
     
 }
 
