@@ -225,10 +225,11 @@ namespace App {
         if(_device_status.isPowerOff && lv_disp_get_inactive_time(NULL) > _device_status.PowerOff){
             for(int i =5;i>=0;i--){
                 _device->Lcd.setBrightness(i*10);
-                delay(50);
+                delay(40);
             }
             onDestroy();
             _device->Pow.powerOff();
+            
         }
     }
 

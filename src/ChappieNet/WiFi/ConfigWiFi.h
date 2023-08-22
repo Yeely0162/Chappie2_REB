@@ -33,6 +33,7 @@ public:
     String LocalIP();
     String GateWay();
     const char * WiFiMac();
+    String GetIPv6();
     String requesturl(const char * Domain , uint16_t DSport,const char * url);
     
 private:

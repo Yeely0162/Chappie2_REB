@@ -130,6 +130,9 @@ void ConfigWiFi::WiFiloop() {
     }
 }
 
+String ConfigWiFi::GetIPv6() {
+    return (WiFi.status() == WL_CONNECTED) ? (WiFi.localIPv6().toString()) : "0:0:0:0";
+}
 void ConfigWiFi::NtpTimeCorr()  {
     static struct tm timeInfo;
     if (AutoTime){

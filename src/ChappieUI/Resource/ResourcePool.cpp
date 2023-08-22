@@ -38,6 +38,7 @@ do{\
         IMPORT_IMG(battery2);
         IMPORT_IMG(bluetooth_dark);
         IMPORT_IMG(clock_dark);
+        IMPORT_IMG(disk_green);
         IMPORT_IMG(listening);
         IMPORT_IMG(monitor_dark);
         IMPORT_IMG(ok_dark);

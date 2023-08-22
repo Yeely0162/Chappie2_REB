@@ -4,46 +4,65 @@
 #include "ArduinoJson.h"
 #define InternetIONum 5
 #define APIUpdateTime 2000 //ms
+#define SystemInfoUpdateTime 1000 *5
 #define Ubuntu18 ResourcePool::GetFont("UbuntuBold18")
+#define Font12 &lv_font_montserrat_12
+#define Font24 &lv_font_montserrat_24
 LV_IMG_DECLARE(ui_img_icon_Synology_png);
 static std::string app_name = "Synology";
 static CHAPPIE* device;
 static lv_timer_t* _Info_update;
 static LGFX_Sprite* screen;
-static void Info_update(lv_timer_t * timer);
-static int SidJson(String Json);
-static void CPU_Net_RAM_Json(String Json);
-static String HttpGetJson(String url);
-static TaskHandle_t  API_Update_Task;
+void Info_update(lv_timer_t * timer);
+int SidJson(String Json);
+void CPU_Net_RAM_Json(String Json);
+String HttpGetJson(String url);
+TaskHandle_t  API_Update_Task,System_Info_Task;
 static lv_anim_t anim;
-static WiFiClient client;
+
+
 struct MeterInfo{
     lv_obj_t * METER;
     lv_meter_indicator_t* INDIC;
     int16_t Meter_val_old = 0;
 };
-static MeterInfo Meter1,Meter2,Meter;
-
-static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x);
-
+MeterInfo Meter,Meter1,Meter2;
+void SystemInfoTask(void *arg);
+void RequestTask(void *arg);
+MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x);
+//---------page2 define-----------
+lv_obj_t * Volume1,*Volume2,*CpuBOX,*RamBOX,*TempBox,*WorkBox,*DeviceBOX;
+lv_obj_t * InfoBox;
+//---------page2 define-----------
 struct SynologyConfig{
   int16_t SSHPort= 22;
   String  User  = "Chappie";
   String  Password  = "uUYVG<4n";
   String  Sid;
   bool  SidStatus = false;
-  String SidAPI = "http://192.168.0.8:20203/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
-  String CPUAPI = ("http://192.168.0.8:20203/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
-  String LogoutAPI = ("http://192.168.0.8:20203/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
-  String StorageAPI = ("http://192.168.0.8:20203/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
+  String SidAPI = "https://dsm.yeely.top:1666/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
+  String CPUAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
+  String LogoutAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
+  String StorageAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
+  String SystemInfoAPI = "https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Core.System&method=info&version=3&_sid=";
 }SyConfig;
 struct SynologyInfo{
-    const char *  ServerName = "";
+    String ServerName  = "non";
+    String DeviceName  ="non";
+    String FirmwareVer = "non";
+    String StorageName[2] ={"non"};
+    String CPUType ="non";
+    String UpTime ="non";
+    int8_t  CPUCoreNum = 0;
+    int8_t InternetIOStatus[InternetIONum]={0};
     int16_t CPUUse  = 1;
+    int16_t RAMGB   = 0;
     int16_t RAMUse  = 1;
+    int16_t SystemTemp = 1;
     int32_t Upload  = 1;
     int32_t Downlaod= 1;
-    int8_t InternetIOStatus[InternetIONum]={0};
+    uint64_t Volume[2][2]={0}; // 0:total 1:used
+    bool iSTempWarn = false; 
 }SystemInfo;
 struct {
     bool SIDStatu = false;
@@ -52,13 +71,13 @@ struct {
     int8_t SIDCode = 0;
 }TaskStatus;
 
-static lv_obj_t * ui_SyPageMain,*ui_SyPageSec;
-static lv_obj_t * Uplabel,*Downlabel,*mask;
-static lv_obj_t * net_chart;
-static lv_obj_t * TimeLabel;
-static lv_chart_series_t * ser1;
-static lv_chart_series_t * ser2;
-static int SynologyPad_Current = 0;
+lv_obj_t * ui_SyPageMain,*ui_SyPageSec;
+lv_obj_t * Uplabel,*Downlabel,*mask;
+lv_obj_t * net_chart;
+lv_obj_t * TimeLabel;
+lv_chart_series_t * ser1;
+lv_chart_series_t * ser2;
+int SynologyPad_Current = 0;
 
 static std::array<_lv_obj_t**, 2> SynologyPad_List = {
     &ui_SyPageMain,
@@ -107,7 +126,7 @@ static void set_meter_ram_value(void* indic, int32_t v)
 //     return arc;
 // }
 
-static MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
+MeterInfo ArcCreate(lv_obj_t * obj,const char * text,int16_t value,int x){
     Meter.METER = lv_meter_create(obj);
     lv_obj_remove_style(Meter.METER, NULL, LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(Meter.METER, 0, 0);
@@ -284,7 +303,7 @@ void Network_Charts(lv_obj_t* obj)
     /*Add two data series*/
     ser1 = lv_chart_add_series(net_chart, lv_color_hex(0x85FFBD), LV_CHART_AXIS_PRIMARY_Y);
     ser2 = lv_chart_add_series(net_chart, lv_color_hex(0xFFFB7D), LV_CHART_AXIS_SECONDARY_Y);
-
+    
 }
 
 void Content_Update(MeterInfo *meterobj,int16_t value,bool check){
@@ -298,7 +317,7 @@ void Content_Update(MeterInfo *meterobj,int16_t value,bool check){
     }
 
     lv_anim_set_values(&anim, meterobj->Meter_val_old, value);
-    lv_anim_set_time(&anim, 800); /*2 sec for 1 turn of the minute hand (1 hour)*/
+    lv_anim_set_time(&anim, 700); /*2 sec for 1 turn of the minute hand (1 hour)*/
     lv_anim_set_var(&anim, meterobj->INDIC);
     lv_anim_start(&anim);
     lv_anim_set_path_cb(&anim,lv_anim_path_ease_in_out);
@@ -315,7 +334,7 @@ float NetworkSpeed(int32_t bytes) {
 }
 void SpeedSymbol(int32_t v1,int32_t v2){
     bool a = false;
-    if ( v1 && v2 < 1024 * 1024  ){
+    if ( v1 < 1024 * 1024 && v2 < 1024 * 1024  ){
         lv_label_set_text(mask,"#85FFBD KB# #FFFFFF |# #FFFB7D KB#");
     }
     else if ( v1 >= 1024 * 1024  && v2 >= 1024 * 1024)
@@ -351,6 +370,60 @@ void Net_Update(lv_obj_t * net1,lv_obj_t * net2,int32_t value1,int32_t value2){
 
 }
 
+const char *StorageVolumeCal(uint64_t vol) {
+    float volume = vol / 1024.0 * 1024.0;
+    static char buffer[10];
+    if(volume >= 1024){ // MB
+        if((volume /=1024.0) >= 1024){//GB
+            if((volume/=1024.0) >= 1024){//TB
+                snprintf(buffer, 10, "%.2fTB",(volume/=1024.0));
+            }
+            snprintf(buffer, 10, "%.2fGB",(volume/=1024.0));
+        }
+        else{
+            snprintf(buffer, 10, "%.2fMB",volume);
+        }
+    }
+    else{
+        snprintf(buffer, 10, "%.2fKB",volume);
+    }
+    return buffer;
+}
+void StorageLabelUpdate(lv_obj_t * volume, int select){
+    // lv_label_set_text()
+    float value = (float(SystemInfo.Volume[select][1]) / SystemInfo.Volume[select][0]) * 100;
+    printf("\nvolValue1:%d",value);
+
+    lv_bar_set_value(lv_obj_get_child(volume,1),(int)value, LV_ANIM_OFF);
+    lv_label_set_text(lv_obj_get_child(volume,2),SystemInfo.StorageName[select].c_str());
+
+    static char label_buffer[14];
+    snprintf(label_buffer, 14, "%s|%s", StorageVolumeCal(SystemInfo.Volume[select][1]), StorageVolumeCal(SystemInfo.Volume[select][0]));
+    lv_label_set_text(lv_obj_get_child(volume,3),label_buffer);
+    lv_label_set_text_fmt(lv_obj_get_child(volume,4),"%.1f%%",value); 
+
+}
+void SystemInfoBox(lv_obj_t * Info,String text,String smalltitle2,bool isDot){
+    // lv_label_set_text()
+    if (smalltitle2 != NULL || "NULL"){
+        lv_label_set_text(lv_obj_get_child(Info,1),smalltitle2.c_str());
+    }
+    
+    lv_label_set_text(lv_obj_get_child(Info,2),text.c_str());
+    
+
+}
+void SystemInfoBox(lv_obj_t * Info,int value,int select,String format,bool isDot){
+    // lv_label_set_text()
+    if(isDot){
+        
+    }else{
+        
+    }
+    lv_label_set_text_fmt(lv_obj_get_child(Info,select),format.c_str(),value);
+    
+
+}
 //--------------page Main style-------------------
 
 //-----------------------Function-------------------
@@ -359,7 +432,7 @@ void UserLogout(){
     TaskStatus.SIDStatu =false;
 }
 // Json analysis
-static int SidJson(String Json){
+int SidJson(String Json){
     StaticJsonDocument<384> doc;
     deserializeJson(doc, Json);
     int code = 1;
@@ -371,14 +444,14 @@ static int SidJson(String Json){
     SyConfig.Sid = doc["data"]["sid"].as<String>();
     return code; 
 }
-static void CPU_Net_RAM_Json(String Json){
+void CPU_Net_RAM_Json(String Json){
     StaticJsonDocument<1024> doc;
     deserializeJson(doc,Json);
     JsonObject hosts_0 = doc["data"]["hosts"][0];
     SystemInfo.CPUUse  = hosts_0["cpu_usage"];
     SystemInfo.RAMUse  = hosts_0["ram_usage"];
     
-    printf("\nCPU:%d, RAM:%d\n",SystemInfo.CPUUse,SystemInfo.RAMUse);
+    printf("CPU:%d, RAM:%d\n",SystemInfo.CPUUse,SystemInfo.RAMUse);
     int i =0;
     SystemInfo.Upload = 0,
     SystemInfo.Downlaod = 0;
@@ -397,20 +470,21 @@ static void CPU_Net_RAM_Json(String Json){
     }
 
 }
-static String HttpGetJson(String url){
+String HttpGetJson(String url){
     HTTPClient http;
     http.begin(url);
     int code = http.GET();
     if ( code == HTTP_CODE_OK){
         String json = http.getString();
-        printf("Json:%s",json.c_str());
+        // printf("Json:%s",json.c_str());
+        http.end();
         return json;
     }else{
         http.end();
         return "None";
     }
 }
-static void ui_event_SyPad(lv_event_t * e)
+void ui_event_SyPad(lv_event_t * e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
     lv_obj_t * target = lv_event_get_target(e);
@@ -419,7 +493,8 @@ static void ui_event_SyPad(lv_event_t * e)
         if (SynologyPad_Current < (SynologyPad_List.size() - 1)) {
             SynologyPad_Current++;
             lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
-            // _watch_time_update(_timer_watch_time_update);
+            Info_update(_Info_update);
+            // RequestTask(API_Update_Task);
         }
     }
     if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) {
@@ -430,17 +505,47 @@ static void ui_event_SyPad(lv_event_t * e)
         }
         else {
             lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 0, false);
-            // _watch_time_update(_timer_watch_time_update);
+            Info_update(_Info_update);
+            // SystemInfoTask(System_Info_Task);
         }
     }
 }
-
+void Storage_Json(String Json){
+    StaticJsonDocument<1526> doc;
+    deserializeJson(doc, Json);   
+    int i = 0;
+    for (JsonObject data_vol_info_item : doc["data"]["vol_info"].as<JsonArray>()) {
+        SystemInfo.StorageName[i] = data_vol_info_item["name"].as<String>(); // "volume_2", "volume_1"
+        SystemInfo.Volume[i][0] = data_vol_info_item["total_size"].as<u64_t>(); // "475195183104", ...
+        SystemInfo.Volume[i][1] = data_vol_info_item["used_size"].as<u64_t>(); // "260152016896", ...
+        printf("Vol:%s\n",data_vol_info_item["total_size"].as<const char *>());
+        i++;
+    }
+    // printf("VolumeNamr:%s,total:%lld,used:%lld\n",SystemInfo.StorageName[0].c_str(),SystemInfo.Volume[0][0],SystemInfo.Volume[0][1]);
+}
+void SystemInfo_Json(String Json){
+    StaticJsonDocument<1024> doc;
+    DeserializationError error = deserializeJson(doc, Json);   
+    JsonObject data = doc["data"];
+    SystemInfo.CPUCoreNum = data["cpu_cores"]; // "4"
+    SystemInfo.CPUType = data["cpu_series"].as<String>(); // "J3455"
+    SystemInfo.FirmwareVer = data["firmware_ver"].as<String>(); // "DSM 7.1.1-42962 Update 6"
+    SystemInfo.DeviceName = data["model"].as<String>(); // "DS718+"
+    SystemInfo.RAMGB = data["ram_size"]; // 6144
+    SystemInfo.SystemTemp = data["sys_temp"]; // 51
+    SystemInfo.iSTempWarn = data["temperature_warning"]; // false
+    SystemInfo.UpTime = data["up_time"].as<String>(); // "158:56:32"
+    // printf("\nDevice:%s,RAMGB:%d SystemTemp:%d,Up_Time:%s,Firware:%s\n",
+    //                 SystemInfo.DeviceName,SystemInfo.RAMGB,
+    //                 SystemInfo.SystemTemp,SystemInfo.UpTime,
+    //                 SystemInfo.FirmwareVer.c_str()
+    //                 );
+}
 //-----------------------Function-------------------
 
 //-----------------------Task-------------------
 void RequestTask(void *arg)
 {
-    
     TaskStatus.TaskOnWork = true;
     while (true)
     {
@@ -449,7 +554,7 @@ void RequestTask(void *arg)
             TaskStatus.SIDCode  =  SidJson(HttpGetJson(SyConfig.SidAPI));
             TaskStatus.SIDStatu = true;
         }
-        if (TaskStatus.SIDStatu)
+        if (TaskStatus.SIDStatu && device->Wf.isConnected())
         {
             CPU_Net_RAM_Json(HttpGetJson(SyConfig.CPUAPI + SyConfig.Sid));           
         }
@@ -458,17 +563,46 @@ void RequestTask(void *arg)
     TaskStatus.TaskOnWork = false;
     vTaskDelete(API_Update_Task);
 }
-static void Info_update(lv_timer_t * timer){
-    static char label_buffer[10];
-    static I2C_BM8563_TimeTypeDef rtc_time;
-    static int16_t hours, minutes, seconds;
-    device->Rtc.getTime(&rtc_time);
-    snprintf(label_buffer, 10, "%02d:%02d", rtc_time.hours, rtc_time.minutes);
-    lv_label_set_text(TimeLabel, label_buffer);
-    Content_Update(&Meter1,SystemInfo.CPUUse,true);
-    Content_Update(&Meter2,SystemInfo.RAMUse,false);
-    Net_Update(Uplabel,Downlabel,SystemInfo.Upload,SystemInfo.Downlaod);
+void SystemInfoTask(void *arg)
+{
+    while (true)
+    {
+        /* code */
+        vTaskDelay(SystemInfoUpdateTime);
+        if(TaskStatus.SIDStatu && device->Wf.isConnected()){
+            SystemInfo_Json(HttpGetJson(SyConfig.SystemInfoAPI + SyConfig.Sid));
+            Storage_Json(HttpGetJson(SyConfig.StorageAPI + SyConfig.Sid));
+            vTaskDelay(55000);
+        }
+        
+    }
+    vTaskDelete(System_Info_Task);
 }
+
+void Info_update(lv_timer_t * timer){
+    if(SynologyPad_Current == 0){
+        static char label_buffer[10];
+        static I2C_BM8563_TimeTypeDef rtc_time;
+        static int16_t hours, minutes, seconds;
+        device->Rtc.getTime(&rtc_time);
+        snprintf(label_buffer, 10, "%02d:%02d", rtc_time.hours, rtc_time.minutes);
+        lv_label_set_text(TimeLabel, label_buffer);
+        Content_Update(&Meter1,SystemInfo.CPUUse,true);
+        Content_Update(&Meter2,SystemInfo.RAMUse,false);
+        Net_Update(Uplabel,Downlabel,SystemInfo.Upload,SystemInfo.Downlaod);
+    }else if(SynologyPad_Current == 1){
+        StorageLabelUpdate(Volume1,0);
+        StorageLabelUpdate(Volume2,1);
+        SystemInfoBox(CpuBOX,SystemInfo.CPUType,String(SystemInfo.CPUCoreNum),false);
+        SystemInfoBox(DeviceBOX,SystemInfo.DeviceName,"T",false);
+        SystemInfoBox(RamBOX,SystemInfo.RAMGB / 1024.0,1,"%d G",false);
+        SystemInfoBox(TempBox,SystemInfo.SystemTemp,1,"%d C",true);
+        SystemInfoBox(WorkBox,SystemInfo.UpTime,"Time",false);
+        // SystemInfoBox(TempBox,SystemInfo.RAMGB/1024,"%d G",false);
+    }
+    
+}
+
 //-----------------------Task-------------------
 
 
@@ -493,6 +627,83 @@ void ScreenMain(){
     
 }
 
+
+lv_obj_t * StorageView(lv_obj_t * obj,const char * diskName,const char * StorageLabel,int32_t value){
+    lv_obj_t * StorageSMBox = lv_obj_create(obj);
+    lv_obj_set_size(StorageSMBox,245,65);
+    lv_obj_set_style_bg_color(StorageSMBox, lv_color_hex(0x53DE77), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(StorageSMBox, 0,0);
+    lv_obj_set_style_radius(StorageSMBox, 5,0);
+    lv_obj_set_style_pad_all(StorageSMBox,0,0);
+    lv_obj_set_style_bg_opa(StorageSMBox,20,0);
+
+    lv_obj_t *img = lv_img_create(StorageSMBox);//0 child
+    lv_obj_align(img,LV_ALIGN_LEFT_MID,5,0);
+    lv_img_set_src(img,ResourcePool::GetImage("disk_green"));
+
+    lv_obj_t * Storagebar = lv_bar_create(StorageSMBox); //1
+    lv_obj_set_size(Storagebar, 170, 10);
+    lv_obj_align(Storagebar,LV_ALIGN_CENTER,15,0);
+    lv_bar_set_value(Storagebar, value, LV_ANIM_OFF);
+
+    lv_obj_t * dn = lv_label_create(StorageSMBox);//2
+    lv_obj_set_align(dn,LV_ALIGN_TOP_MID);
+    lv_obj_set_style_text_font(dn,Font12,0);
+    lv_label_set_text(dn,diskName);
+    lv_obj_set_style_text_color(dn,lv_color_hex(0xACACAC),0);
+
+    lv_obj_t * SgLabel = lv_label_create(StorageSMBox);//3
+    lv_obj_align(SgLabel,LV_ALIGN_BOTTOM_MID,0,0);
+    lv_obj_set_style_text_font(SgLabel,Font12,0);
+    lv_label_set_text(SgLabel,StorageLabel);
+    lv_obj_set_style_text_color(SgLabel,lv_color_hex(0xACACAC),0);
+
+    lv_obj_t * SgPercentLabel = lv_label_create(StorageSMBox);//4
+    lv_obj_align(SgPercentLabel,LV_ALIGN_BOTTOM_RIGHT,-15,0);
+    lv_obj_set_style_text_font(SgPercentLabel,Font12,0);
+    lv_label_set_text_fmt(SgPercentLabel,"%d%%",value);
+    lv_obj_set_style_text_color(SgPercentLabel,lv_color_hex(0xACACAC),0);
+    return StorageSMBox;
+}
+lv_obj_t * Ser_Status_Box(lv_obj_t * obj,const char * smalltitle1,const char * smalltitle2,const char *content,bool isDot){
+    lv_obj_t * IFBox = lv_obj_create(obj);
+    lv_obj_set_size(IFBox,130,60);
+    lv_obj_clear_flag(IFBox, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_border_opa(IFBox, 0,0);
+    lv_obj_set_style_radius(IFBox,8,0);
+    lv_obj_set_style_pad_all(IFBox,0,0);
+    lv_obj_set_style_bg_color(IFBox, lv_color_hex(0x85FFBD), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(IFBox, 30,0);
+    if(isDot){
+        lv_obj_t * dot = lv_obj_create(IFBox);//0
+        lv_obj_set_size(dot, 15, 15);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+        lv_obj_align(dot,LV_ALIGN_LEFT_MID,10,0);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(0x53DE77), LV_STATE_DEFAULT);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_opa(dot, 0,0);
+    }else{
+        lv_obj_t * st = lv_label_create(IFBox);//0
+        lv_obj_align(st,LV_ALIGN_TOP_LEFT,2,2);
+        lv_obj_set_style_text_font(st,Font12,0);
+        lv_label_set_text_static(st,smalltitle1);
+        lv_obj_set_style_text_color(st,lv_color_hex(0x53DE77),0);
+    }
+    if(smalltitle2 != NULL){
+        lv_obj_t * st2 = lv_label_create(IFBox);//1
+        lv_obj_set_align(st2,LV_ALIGN_TOP_RIGHT);
+        lv_obj_set_style_text_font(st2,Font12,0);
+        lv_label_set_text(st2,smalltitle2);
+        lv_obj_set_style_text_color(st2,lv_color_hex(0x53DE77),0);
+    }
+    lv_obj_t * con = lv_label_create(IFBox);//2
+    lv_obj_set_align(con,LV_ALIGN_CENTER);
+    lv_label_set_text(con,content);
+    lv_obj_set_style_text_font(con,Font24,0);
+    lv_obj_set_style_text_color(con,lv_color_hex(0x53DE77),0);
+    return IFBox;
+}
+
 void ScreenSec(){
     ui_SyPageSec = lv_obj_create(NULL);
     lv_obj_clear_flag(ui_SyPageSec, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
@@ -500,34 +711,40 @@ void ScreenSec(){
     lv_obj_set_width(ui_SyPageSec,280);
     lv_obj_set_height(ui_SyPageSec,240);
     lv_obj_set_style_bg_opa(ui_SyPageSec, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_align(ui_SyPageSec, LV_ALIGN_CENTER);
+    // lv_obj_set_align(ui_SyPageSec, LV_ALIGN_CENTER);
+    lv_obj_set_flex_flow(ui_SyPageSec, LV_FLEX_FLOW_COLUMN);
 
-    lv_obj_t * lmeter = lv_meter_create(ui_SyPageSec);
-    lv_obj_remove_style(lmeter, NULL, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(lmeter, 0, 0);
-    lv_obj_set_style_border_opa(lmeter, 0, 0);
-    lv_obj_set_style_radius(lmeter,1,0);
-    lv_meter_scale_t* scale_min1 = lv_meter_add_scale(lmeter);
-    lv_obj_set_size(lmeter, 150, 150);
-    lv_obj_set_pos(lmeter, 0, 0);
+    lv_obj_t * StorageBox = lv_obj_create(ui_SyPageSec);
+    lv_obj_set_size(StorageBox,280,85);
+    lv_obj_set_flex_flow(StorageBox, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_color(StorageBox, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(StorageBox, 60,0);
+    lv_obj_set_style_border_opa(StorageBox, 0,0);
+    lv_obj_set_style_radius(StorageBox, 0,0);
 
-    lv_meter_set_scale_ticks(lmeter, scale_min1, 50, 2, 10, lv_color_hex(0x85FFBD));
-    lv_meter_set_scale_range(lmeter, scale_min1, 0, 100, 270, 135);
+    Volume1 = StorageView(StorageBox,"volume_1","1.6TB/2.7TB",80);
+    Volume2 = StorageView(StorageBox,"volume_2","1.6GB/2.7GB",20);
 
-    lv_meter_indicator_t* indic;
-    indic = lv_meter_add_scale_lines(lmeter, scale_min1, lv_color_hex(0x85FFBD), lv_color_hex(0xFF7F3B),false,0);
-    lv_meter_set_indicator_end_value(lmeter, (lv_meter_indicator_t*)indic, 3);
-    lv_obj_set_align(lmeter,LV_ALIGN_TOP_LEFT);
-    lv_obj_set_x(lmeter,50);
-    lv_obj_set_y(lmeter,-3);
+    //big box
+    InfoBox = lv_obj_create(ui_SyPageSec);
+    lv_obj_set_width(InfoBox,280);
+    lv_obj_set_height(InfoBox,150);
+    lv_obj_set_style_pad_all(InfoBox,0,0);
+    lv_obj_set_style_bg_color(InfoBox, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_add_flag(InfoBox, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_flex_flow(InfoBox, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_border_opa(InfoBox, 0,0);
     
-
-    // lv_obj_t * arc = lv_arc_create(ui_SyPageSec);
-    // lv_obj_set_size(arc, 150, 150);
-    // lv_arc_set_rotation(arc, 135);
-    // lv_arc_set_bg_angles(arc, 0, 270);
-    // lv_arc_set_value(arc, 40);
-    // lv_obj_center(arc);
+    DeviceBOX = Ser_Status_Box(InfoBox,"DSM","Name","non",false);
+    CpuBOX = Ser_Status_Box(InfoBox,"CPU","4","non",false);
+    RamBOX = Ser_Status_Box(InfoBox,"RAM",NULL,"non",false);
+    TempBox= Ser_Status_Box(InfoBox,"Temp",NULL,"non",true);
+    WorkBox= Ser_Status_Box(InfoBox,"Up","Time","10Day:12Hour",false);
+    // WorkingTimeLabel = lv_label_create(ui_SyPageSec);
+    // lv_obj_set_align(WorkingTimeLabel,LV_ALIGN_BOTTOM_MID);
+    // lv_obj_set_style_text_font(WorkingTimeLabel,Font12,0);
+    // lv_label_set_text(WorkingTimeLabel,"100 Day 10 Hor");
+    // lv_obj_set_style_text_color(WorkingTimeLabel,lv_color_hex(0x9C9C9C),0);
     
 }
 
@@ -545,18 +762,6 @@ void ScreenStorage(){
     // device->Wf.requesturl(SyConfig.domain,SyConfig.Sport,SyConfig.CPUAPI);
 }
 // Timer
-
-void ErrorPage(const char *text){
-    screen = new LGFX_Sprite(&device->Lcd);
-    screen->fillScreen(TFT_BLACK);
-    screen->setTextSize(2);
-    screen->setTextColor(TFT_ORANGE);
-    screen->setCursor(0, 30);
-    screen->printf(text);
-    screen->printf(" > (=.=) <\n");
-    screen->pushSprite(0, 0);
-}
-
 namespace App {
 
     /**
@@ -590,46 +795,15 @@ namespace App {
         UI_LOG("[%s] onCreate\n", App_Synology_appName().c_str());
         // UI Init
         ScreenInit();
+        xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 4,NULL, 5, &API_Update_Task, 1 );
+        xTaskCreatePinnedToCore(SystemInfoTask, "SystemInfo", 1024 * 4,NULL, 6, &System_Info_Task, 1 );
+        _Info_update = lv_timer_create(Info_update, APIUpdateTime + 500,NULL);
+        Info_update(_Info_update);     // status bar time update
         for (auto i : SynologyPad_List) {
             lv_obj_add_event_cb(*i, ui_event_SyPad, LV_EVENT_ALL, NULL);
         }
         SynologyPad_Current = 0;
         lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, true);
-
-        _Info_update = lv_timer_create(Info_update, APIUpdateTime + 500,NULL);
-        Info_update(_Info_update);     // status bar time update
-        xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 3,NULL, 5, &API_Update_Task, 1 );
-        // switch (code)
-        // {
-        //     case 0:
-        //         ErrorPage("NetWork Error or Other Error");
-        //         break;
-        //     case 1:
-                
-        //         break;
-        //     case 100 ... 104:
-        //         /* API problem */
-        //         ErrorPage("API Error");
-        //         break;
-        //     case 105:
-        //         /* Insufficient user privilege */
-        //         ErrorPage("Insufficient user privilege");
-        //         break;
-        //     case 107:
-        //         /* Multiple login detected */
-        //         ErrorPage("Multiple login detected");
-        //         break;
-        //     case 119:
-        //         /* Invalid session */
-        //         ErrorPage("Invalid session");
-        //         if(sizeof(SyConfig.Sid) > 5){
-        //             UserLogout(); // 注销上一个Cookie
-        //         }
-        //         break;
-        //     default:    
-        //         break;
-        // }
-                
     }
 
 
@@ -652,9 +826,23 @@ namespace App {
     void App_Synology_onDestroy()
     {
         UI_LOG("[%s] onDestroy\n", App_Synology_appName().c_str());
-        UserLogout();
-        lv_timer_del(_Info_update);
+        // delete CpuBOX;
+        // delete RamBOX;
+        // delete TempBox;
+        // delete WorkBox;
+        // delete DeviceBOX;
         vTaskDelete(API_Update_Task);
+        vTaskDelete(System_Info_Task);
+        lv_timer_del(_Info_update);
+        lv_obj_del(ui_SyPageMain);
+        lv_obj_del(ui_SyPageSec);
+        
+        if (device->Wf.isConnected()){
+            SyConfig.SidStatus=false;
+            UserLogout();
+        }
+        UI_LOG("Destroy Done!");
+        
     }
 
 
