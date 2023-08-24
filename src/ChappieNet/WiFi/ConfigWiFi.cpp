@@ -70,7 +70,7 @@ const char * ConfigWiFi::WiFiN(){
 void ConfigWiFi::Init(){
     WiFi.hostname(HOST_NAME);
     InitWiFi();
-    WiFi.enableIpV6();
+    WiFi.mode(WIFI_STA);
 }
 bool ConfigWiFi::APClose(){
     server.close();
@@ -80,6 +80,7 @@ bool ConfigWiFi::APClose(){
     OnAP=false;
     return true;
 }
+    
 
 void ConfigWiFi::enableWiFi() {
     if (isConnected()) {
@@ -88,8 +89,6 @@ void ConfigWiFi::enableWiFi() {
     } else {
         wifiEnabled = true;
         WiFi.begin(WiFi_Name.c_str(),WiFi_Pass.c_str());
-        
-        
     }
 }
 
@@ -102,7 +101,9 @@ void ConfigWiFi::disableWiFi() {
         WiFi_LOG( "WiFi已经是禁用状态" );
     }
 }
-
+bool ConfigWiFi::enableIPv6() {
+    return WiFi.enableIpV6();
+}
 bool ConfigWiFi::isWiFiEnabled() const {
     return wifiEnabled;
 }
@@ -195,3 +196,5 @@ String ConfigWiFi::requesturl(const char * Domain , uint16_t DSport,const char *
     
     return "Get Date Fail";  
 }
+
+

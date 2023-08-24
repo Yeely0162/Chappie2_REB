@@ -60,7 +60,7 @@ void Status_update(lv_timer_t * timer)
 {
     Content_Update(wifiInfo.connect,device->Wf.isConnected() ? "Connected" : "Disconnected");
     Content_Update(wifiInfo.IP,device->Wf.LocalIP().c_str());
-    Content_Update(wifiInfo.IPv6,device->Wf.GetIPv6().c_str());
+    // Content_Update(wifiInfo.IPv6,device->Wf.GetIPv6().c_str());
     Content_Update(wifiInfo.GateWay,device->Wf.GateWay().c_str());
     Content_Update(wifiInfo.WiFi_Name,device->Wf.WiFiN());
     Content_Update(wifiInfo.Mac,device->Wf.WiFiMac());
@@ -116,7 +116,7 @@ void SettingPage(void)
     // printf("AP child ID:%d",lv_obj_get_index(AP_switch));
     wifiInfo.WiFi_Name=ContentBox(section,"WiFi:",device->Wf.WiFiN());
     wifiInfo.IP=ContentBox(section,"IP:",device->Wf.LocalIP().c_str());
-    wifiInfo.IPv6=ContentBox(section,"IPv6:",device->Wf.GetIPv6().c_str());
+    // wifiInfo.IPv6=ContentBox(section,"IPv6:",device->Wf.GetIPv6().c_str());
     wifiInfo.GateWay=ContentBox(section,"GyIP:",device->Wf.GateWay().c_str());
     wifiInfo.Mac=ContentBox(section,"MAC:",device->Wf.WiFiMac());
     
