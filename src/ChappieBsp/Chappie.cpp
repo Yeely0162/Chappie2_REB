@@ -10,35 +10,11 @@
  */
 #include "Chappie.h"
 
-String list [5]={"0"};
-bool I2C_dev_scan(uint8_t tar) {
-    uint8_t error, address;
-    int nDevices;
-    nDevices = 0;
-    for (address = 1; address < 127; address++ ) {
-        int i =0;
-        Wire.beginTransmission(address);
-        error = Wire.endTransmission();
-
-        if (error == 0) {
-            printf("\n[I2C_SCAN]: device found at address 0x");
-            if (address < 16)
-                Serial.print("0");
-            printf("%hx\n",address, HEX);
-            if((tar,HEX) == (address, HEX)){
-                return true;
-            }
-            nDevices++;
-        }
-    }
-    return false;
-}
-
 void CHAPPIE::init()
 {
     /* Init I2C */
     Wire.begin(5, 4);
-    // Wire.setClock(400000);
+    Wire.setClock(400000);
     // delay(3000);
     /* Init power contrl */
     delay(30);
@@ -75,19 +51,13 @@ void CHAPPIE::init()
     /* Init RTC */
     Rtc.begin();
     /* Init IMU */
-    // Imu.init();
+    Imu.init();
     /* Init SD card */
     Sd.init();
     
     /* Init BMP280 */
     Env.init();
     
-    if(!I2C_dev_scan(167)){ // 167(OCT)  - > 77 (HEX)
-        Pow.CloseLDO();
-    }else{
-        Env.init();
-    }
-    // printf("Temp:%.2f,Pressure: %.2f , Altitude:%.2f",Env.getTemperature(),Env.getPressure(),Env.calcAltitude(Env.getPressure()));
     
     /* Fire up */
     Speaker.setVolume(50);

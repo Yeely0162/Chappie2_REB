@@ -68,7 +68,7 @@ static void _espnow_joystick_sender()
     delay(10);
 }
 
-// Origin Code
+
 static void _espnow_imu_sender()
 {
     static char data_send[20];
@@ -96,6 +96,7 @@ static void _espnow_imu_sender()
 
     delay(10);
 }
+
 
 static void _espnow_choose_sender_mode()
 {

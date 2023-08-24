@@ -39,7 +39,7 @@ int CHAPPIEUI::begin()
 
     /* Init lvgl */
     _device->lvgl.init(&_device->Lcd, &_device->Tp);
-    
+
     /* Start launcher */
     _launcher->onCreate();
 

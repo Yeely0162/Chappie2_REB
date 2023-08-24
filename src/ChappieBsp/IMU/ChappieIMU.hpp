@@ -27,11 +27,13 @@ class ChappieIMU : public MPU6050 {
         ~ChappieIMU() {}
 
         inline void init()
-        {
+        {   
+
             // initialize device
             initialize();
             printf(testConnection() ? "[IMU] connection successful\n" : "[IMU] connection failed\n");
-
+            // reset DMP 
+            // resetDMP();
             // load and configure the DMP
             uint8_t devStatus = dmpInitialize();
 
@@ -42,6 +44,7 @@ class ChappieIMU : public MPU6050 {
             // setZAccelOffset(1788);
 
             // make sure it worked (returns 0 if so)
+            printf("devStatus:%d\n",devStatus);
             if (devStatus == 0) {
                 // Calibration Time: generate offsets and calibrate our MPU6050
                 CalibrateAccel(6);
