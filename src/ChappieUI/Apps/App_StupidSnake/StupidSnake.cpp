@@ -141,9 +141,9 @@ void Game_End()
 void Game_Input_Update_Callback(MoveDirection_t &MoveDirection)
 {
     /* Change moving direction, e.g. MoveDirection = MOVE_RIGHT */
-    float y, p, r;
+    float y, p, r = 0;
     Device->Imu.getYawPitchRoll(y, p, r);
-    // printf("Y: %.2f P: %.2f R:%.2f",y,p,r);
+
     if (r > 20.0)
         MoveDirection = MOVE_DOWN;
     if (r < -20.0)

@@ -15,7 +15,7 @@
 
 
 static std::string app_name = "StupidSnake";
-static CHAPPIE *device;
+static CHAPPIE* device;
 
 LV_IMG_DECLARE(ui_img_icon_snakegame_png);
 
