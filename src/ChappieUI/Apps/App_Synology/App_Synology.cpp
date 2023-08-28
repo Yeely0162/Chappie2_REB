@@ -19,7 +19,7 @@ void CPU_Net_RAM_Json(String Json);
 String HttpGetJson(String url);
 TaskHandle_t  API_Update_Task,System_Info_Task;
 static lv_anim_t anim;
-static WiFiClient client;
+
 
 struct MeterInfo{
     lv_obj_t * METER;
@@ -36,15 +36,15 @@ lv_obj_t * InfoBox;
 //---------page2 define-----------
 struct SynologyConfig{
   int16_t SSHPort= 22;
-  String  User  = "Chappie";
-  String  Password  = "uUYVG<4n";
+  String  User  = "XXXXXXXXXXXXX";
+  String  Password  = "XXXXXXXXXXXX";
   String  Sid;
   bool  SidStatus = false;
-  String SidAPI = "https://dsm.yeely.top:1666/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
-  String CPUAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
-  String LogoutAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
-  String StorageAPI = ("https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
-  String SystemInfoAPI = "https://dsm.yeely.top:1666/webapi/entry.cgi?api=SYNO.Core.System&method=info&version=3&_sid=";
+  String SidAPI = "xxxxxxxxxxxx/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account="+ User +"&passwd="+ Password +"";
+  String CPUAPI = ("xxxxxxxxxxxx/webapi/entry.cgi?api=SYNO.Virtualization.Cluster&method=get_host&version=1&object_id=NOTE_ID&_sid=");
+  String LogoutAPI = ("xxxxxxxxxxxx/webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=logout&_sid=");
+  String StorageAPI = ("xxxxxxxxxxxx/webapi/entry.cgi?api=SYNO.Core.System&type=storage&method=info&version=3&_sid=");
+  String SystemInfoAPI = "xxxxxxxxxxxx/webapi/entry.cgi?api=SYNO.Core.System&method=info&version=3&_sid=";
 }SyConfig;
 struct SynologyInfo{
     String ServerName  = "non";
@@ -330,7 +330,9 @@ float NetworkSpeed(int32_t bytes) {
         return  float(bytes / 1000.0);
     } else if (bytes < 1000 * 1000 * 1000) { //MB
         return  float(bytes / 1000000.0);
-    } 
+    }else{
+        return 0.00;
+    }
 }
 void SpeedSymbol(int32_t v1,int32_t v2){
     bool a = false;
@@ -472,12 +474,13 @@ void CPU_Net_RAM_Json(String Json){
 }
 String HttpGetJson(String url){
     HTTPClient http;
+    WiFiClient client;
+    String json = "";
     http.setTimeout(15000);
     http.begin(client,url);
-    printf("remoteIP:%s\n",client.remoteIP().toString().c_str());
     int code = http.GET();
-    if ( code == HTTP_CODE_OK){
-        String json = http.getString();
+    if ( code == HTTP_CODE_OK ){
+        json = http.getString();
         printf("Json:%s",json.c_str());
         http.end();
         return json;
@@ -553,7 +556,7 @@ void RequestTask(void *arg)
     {
         /* code */
         if(!TaskStatus.SIDStatu && device->Wf.isConnected()){
-            // device->Wf.enableIPv6();
+            device->Wf.enableIPv6();
             TaskStatus.SIDCode  =  SidJson(HttpGetJson(SyConfig.SidAPI));
             TaskStatus.SIDStatu = true;
         }
@@ -631,123 +634,8 @@ void ScreenMain(){
 }
 
 
-lv_obj_t * StorageView(lv_obj_t * obj,const char * diskName,const char * StorageLabel,int32_t value){
-    lv_obj_t * StorageSMBox = lv_obj_create(obj);
-    lv_obj_set_size(StorageSMBox,245,65);
-    lv_obj_set_style_bg_color(StorageSMBox, lv_color_hex(0x53DE77), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(StorageSMBox, 0,0);
-    lv_obj_set_style_radius(StorageSMBox, 5,0);
-    lv_obj_set_style_pad_all(StorageSMBox,0,0);
-    lv_obj_set_style_bg_opa(StorageSMBox,20,0);
-
-    lv_obj_t *img = lv_img_create(StorageSMBox);//0 child
-    lv_obj_align(img,LV_ALIGN_LEFT_MID,5,0);
-    lv_img_set_src(img,ResourcePool::GetImage("disk_green"));
-
-    lv_obj_t * Storagebar = lv_bar_create(StorageSMBox); //1
-    lv_obj_set_size(Storagebar, 170, 10);
-    lv_obj_align(Storagebar,LV_ALIGN_CENTER,15,0);
-    lv_bar_set_value(Storagebar, value, LV_ANIM_OFF);
-
-    lv_obj_t * dn = lv_label_create(StorageSMBox);//2
-    lv_obj_set_align(dn,LV_ALIGN_TOP_MID);
-    lv_obj_set_style_text_font(dn,Font12,0);
-    lv_label_set_text(dn,diskName);
-    lv_obj_set_style_text_color(dn,lv_color_hex(0xACACAC),0);
-
-    lv_obj_t * SgLabel = lv_label_create(StorageSMBox);//3
-    lv_obj_align(SgLabel,LV_ALIGN_BOTTOM_MID,0,0);
-    lv_obj_set_style_text_font(SgLabel,Font12,0);
-    lv_label_set_text(SgLabel,StorageLabel);
-    lv_obj_set_style_text_color(SgLabel,lv_color_hex(0xACACAC),0);
-
-    lv_obj_t * SgPercentLabel = lv_label_create(StorageSMBox);//4
-    lv_obj_align(SgPercentLabel,LV_ALIGN_BOTTOM_RIGHT,-15,0);
-    lv_obj_set_style_text_font(SgPercentLabel,Font12,0);
-    lv_label_set_text_fmt(SgPercentLabel,"%d%%",value);
-    lv_obj_set_style_text_color(SgPercentLabel,lv_color_hex(0xACACAC),0);
-    return StorageSMBox;
-}
-lv_obj_t * Ser_Status_Box(lv_obj_t * obj,const char * smalltitle1,const char * smalltitle2,const char *content,bool isDot){
-    lv_obj_t * IFBox = lv_obj_create(obj);
-    lv_obj_set_size(IFBox,130,60);
-    lv_obj_clear_flag(IFBox, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_opa(IFBox, 0,0);
-    lv_obj_set_style_radius(IFBox,8,0);
-    lv_obj_set_style_pad_all(IFBox,0,0);
-    lv_obj_set_style_bg_color(IFBox, lv_color_hex(0x85FFBD), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(IFBox, 30,0);
-    if(isDot){
-        lv_obj_t * dot = lv_obj_create(IFBox);//0
-        lv_obj_set_size(dot, 15, 15);
-        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-        lv_obj_align(dot,LV_ALIGN_LEFT_MID,10,0);
-        lv_obj_set_style_bg_color(dot, lv_color_hex(0x53DE77), LV_STATE_DEFAULT);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_opa(dot, 0,0);
-    }else{
-        lv_obj_t * st = lv_label_create(IFBox);//0
-        lv_obj_align(st,LV_ALIGN_TOP_LEFT,2,2);
-        lv_obj_set_style_text_font(st,Font12,0);
-        lv_label_set_text_static(st,smalltitle1);
-        lv_obj_set_style_text_color(st,lv_color_hex(0x53DE77),0);
-    }
-    if(smalltitle2 != NULL){
-        lv_obj_t * st2 = lv_label_create(IFBox);//1
-        lv_obj_set_align(st2,LV_ALIGN_TOP_RIGHT);
-        lv_obj_set_style_text_font(st2,Font12,0);
-        lv_label_set_text(st2,smalltitle2);
-        lv_obj_set_style_text_color(st2,lv_color_hex(0x53DE77),0);
-    }
-    lv_obj_t * con = lv_label_create(IFBox);//2
-    lv_obj_set_align(con,LV_ALIGN_CENTER);
-    lv_label_set_text(con,content);
-    lv_obj_set_style_text_font(con,Font24,0);
-    lv_obj_set_style_text_color(con,lv_color_hex(0x53DE77),0);
-    return IFBox;
-}
-
 void ScreenSec(){
-    ui_SyPageSec = lv_obj_create(NULL);
-    lv_obj_clear_flag(ui_SyPageSec, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_SyPageSec, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_width(ui_SyPageSec,280);
-    lv_obj_set_height(ui_SyPageSec,240);
-    lv_obj_set_style_bg_opa(ui_SyPageSec, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    // lv_obj_set_align(ui_SyPageSec, LV_ALIGN_CENTER);
-    lv_obj_set_flex_flow(ui_SyPageSec, LV_FLEX_FLOW_COLUMN);
-
-    lv_obj_t * StorageBox = lv_obj_create(ui_SyPageSec);
-    lv_obj_set_size(StorageBox,280,85);
-    lv_obj_set_flex_flow(StorageBox, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_bg_color(StorageBox, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(StorageBox, 60,0);
-    lv_obj_set_style_border_opa(StorageBox, 0,0);
-    lv_obj_set_style_radius(StorageBox, 0,0);
-
-    Volume1 = StorageView(StorageBox,"volume_1","1.6TB/2.7TB",80);
-    Volume2 = StorageView(StorageBox,"volume_2","1.6GB/2.7GB",20);
-
-    //big box
-    InfoBox = lv_obj_create(ui_SyPageSec);
-    lv_obj_set_width(InfoBox,280);
-    lv_obj_set_height(InfoBox,150);
-    lv_obj_set_style_pad_all(InfoBox,0,0);
-    lv_obj_set_style_bg_color(InfoBox, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_add_flag(InfoBox, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_flex_flow(InfoBox, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_border_opa(InfoBox, 0,0);
     
-    DeviceBOX = Ser_Status_Box(InfoBox,"DSM","Name","non",false);
-    CpuBOX = Ser_Status_Box(InfoBox,"CPU","4","non",false);
-    RamBOX = Ser_Status_Box(InfoBox,"RAM",NULL,"non",false);
-    TempBox= Ser_Status_Box(InfoBox,"Temp",NULL,"non",true);
-    WorkBox= Ser_Status_Box(InfoBox,"Up","Time","10Day:12Hour",false);
-    // WorkingTimeLabel = lv_label_create(ui_SyPageSec);
-    // lv_obj_set_align(WorkingTimeLabel,LV_ALIGN_BOTTOM_MID);
-    // lv_obj_set_style_text_font(WorkingTimeLabel,Font12,0);
-    // lv_label_set_text(WorkingTimeLabel,"100 Day 10 Hor");
-    // lv_obj_set_style_text_color(WorkingTimeLabel,lv_color_hex(0x9C9C9C),0);
     
 }
 
@@ -798,36 +686,15 @@ namespace App {
         UI_LOG("[%s] onCreate\n", App_Synology_appName().c_str());
         // UI Init
         ScreenInit();
-        // xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 4,NULL, 5, &API_Update_Task, 1 );
-        // xTaskCreatePinnedToCore(SystemInfoTask, "SystemInfo", 1024 * 4,NULL, 6, &System_Info_Task, 1 );
-        // _Info_update = lv_timer_create(Info_update, APIUpdateTime + 500,NULL);
-        // Info_update(_Info_update);     // status bar time update
-        // for (auto i : SynologyPad_List) {
-        //     lv_obj_add_event_cb(*i, ui_event_SyPad, LV_EVENT_ALL, NULL);
-        // }
-        // SynologyPad_Current = 0;
-        // lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, true);
-        screen = new LGFX_Sprite(&device->Lcd);
-        screen->setRotation(2);
-        screen->setPsram(true);
-        screen->createSprite(device->Lcd.width(), device->Lcd.height());
-        screen->fillScreen(TFT_BLACK);
-        screen->setTextSize(2);
-        screen->setTextColor(TFT_ORANGE);
-        while (true)
-        {
-            screen->setCursor(0, 50);
-            screen->printf(HttpGetJson("https://api.seniverse.com/").c_str());
-            HttpGetJson(SyConfig.SidAPI);
-            screen->setCursor(0, 30);
-            screen->printf(" > (=^.^=)\n");
-            screen->pushSprite(0, 0);
-            delay(5000);
-            if (device->Button.B.pressed())
-                break;
+        xTaskCreatePinnedToCore(RequestTask, "RequestTask", 1024 * 4,NULL, 5, &API_Update_Task, 1 );
+        xTaskCreatePinnedToCore(SystemInfoTask, "SystemInfo", 1024 * 4,NULL, 6, &System_Info_Task, 1 );
+        _Info_update = lv_timer_create(Info_update, APIUpdateTime + 500,NULL);
+        Info_update(_Info_update);     // status bar time update
+        for (auto i : SynologyPad_List) {
+            lv_obj_add_event_cb(*i, ui_event_SyPad, LV_EVENT_ALL, NULL);
         }
-        
-        
+        SynologyPad_Current = 0;
+        lv_scr_load_anim(*SynologyPad_List[SynologyPad_Current], LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, true);
     }
 
 

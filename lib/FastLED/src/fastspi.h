@@ -154,9 +154,9 @@ class SPIOutput<SPI_DATA, SPI_CLOCK, SPI_SPEED> : public ArdunioCoreSPIOutput<SP
 #else
 #  if !defined(FASTLED_INTERNAL) && !defined(FASTLED_ALL_PINS_HARDWARE_SPI)
 #    ifdef FASTLED_HAS_PRAGMA_MESSAGE
-#      pragma message "No hardware SPI pins defined.  All SPI access will default to bitbanged output"
+// #      pragma message "No hardware SPI pins defined.  All SPI access will default to bitbanged output"
 #    else
-#      warning "No hardware SPI pins defined.  All SPI access will default to bitbanged output"
+// #      warning "No hardware SPI pins defined.  All SPI access will default to bitbanged output"
 #    endif
 #  endif
 #endif

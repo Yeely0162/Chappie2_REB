@@ -287,7 +287,7 @@ static void WiFi_AP_Switch_Handler(lv_event_t * e)
     lv_obj_t * obj = lv_event_get_target(e);
     if(code == LV_EVENT_VALUE_CHANGED || LV_EVENT_CLICKED) {
         if (lv_obj_has_state(obj, LV_STATE_CHECKED)){
-            Ap_update_timer = lv_timer_create(Ap_update,500, NULL);
+            Ap_update_timer = lv_timer_create(Ap_update,100, NULL);
             Ap_update(Ap_update_timer);     // status bar time update
             device->Wf.APMode();
         }else {
@@ -403,7 +403,7 @@ namespace App {
 
     /**
      * @brief Return the App name laucnher, which will be show on launcher App list
-     * 
+     *  
      * @return std::string 
      */
     std::string App_Settings_appName()
@@ -431,8 +431,9 @@ namespace App {
     
     void App_Settings_onCreate()
     {
-        UI_LOG("[%s] onCreate\n", App_Settings_appName().c_str());
+        UI_LOG("\n[%s] onCreate\n", App_Settings_appName().c_str());
         SettingPage();
+        
         /*Create a list*/
         
 
@@ -457,7 +458,7 @@ namespace App {
      */
     void App_Settings_onDestroy()
     {
-        UI_LOG("[%s] onDestroy\n", App_Settings_appName().c_str());
+        UI_LOG("\n[%s] onDestroy\n", App_Settings_appName().c_str());
         Setting_Destroy();
     }
 
