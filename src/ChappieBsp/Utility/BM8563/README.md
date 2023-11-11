@@ -30,7 +30,7 @@ This is a library of BM8563, the RTC for I2C connectivity.
 I2C_BM8563 rtc(I2C_BM8563_DEFAULT_ADDRESS, Wire1);
 
 const char* ntpServer = "ntp.aliyun.com";
-void GetNtpTime(){ //鑾峰彇缃戠粶鏍℃椂
+void GetNtpTime(){ //获取网络校时
   // Connect to an access point
   //WiFi.begin();                 // Connect to the access point of the last connection
   WiFi.begin("Mi", "yfpan668033");  // Or, Connect to the specified access point

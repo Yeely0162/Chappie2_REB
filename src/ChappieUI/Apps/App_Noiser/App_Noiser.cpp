@@ -156,18 +156,7 @@ double calculateDecibels(double *vReal, uint16_t samples) {
 
     return dB;
 }
-// double calculateDecibels(double *vReal, uint16_t samples) {
-//     double sum = 0.0;
-//     for (int i = 0; i < samples / 2; i++){
-//         // printf("%.2f,",vReal[i]);
-//         double diff = abs(vReal[i] - STANDER_VALUE);
-//         sum += diff * diff;
-//     }
-//     double rms = sqrt(sum / (double)samples);
-//     double dB = 20 * log10(rms / 0.001f) + GAIN;
 
-//     return dB;
-// }
 void Noiser_update(lv_timer_t * timer)
 {
 

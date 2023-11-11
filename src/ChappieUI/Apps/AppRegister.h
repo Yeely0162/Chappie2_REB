@@ -43,8 +43,8 @@
 #include "App_Gamepad/App_Gamepad.h"
 #include "App_LEDS/App_LEDS.h"
 #include "App_Noiser/App_Noiser.h"
-#include "App_Synology/App_Synology.h"
-#include "App_ChatGPT/App_ChatGPT.h"
+#include "App_Menu/App_Menu.h"
+#include "App_EvilAppleJuice/App_EAJ.h"
 /* Header files locator */
 /* Don't remove this, or python script's auto login will be failed */
 
@@ -59,18 +59,17 @@ namespace App {
          * 
          */
         App_Login(Watch),
-		App_Login(Noiser),
-		App_Login(LEDS),
-		App_Login(Synology),
-		App_Login(ChatGPT),
+        App_Login(EAJ),
 		App_Login(StupidSnake),
-		App_Login(Dino),
+        App_Login(Dino),
+        App_Login(LEDS),
+        App_Login(Noiser),
 		App_Login(FFT),
 		App_Login(ESPNOW),
 		App_Login(WifiTV),
 		App_Login(Gamepad),
-		App_Login(Settings),
-		
+        App_Login(Menu),
+        App_Login(Settings),
 		/* Login locator */
         /* Don't remove this, or python script's auto login will be failed */
 

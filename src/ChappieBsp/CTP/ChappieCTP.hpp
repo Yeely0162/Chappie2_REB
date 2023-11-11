@@ -181,7 +181,7 @@ class ChappieCTP {
             #if USING_MAP_TO_CALIBRATE
 
                 /* Remap the possition value */
-                x_pos = map(21, 6, 258, 0, 280);
+                x_pos = map(_x_pos, 6, 258, 0, 280);
                 y_pos = map(_y_pos, 15, 230, 0, 240);
 
                 #ifdef CTP_HORIZON

@@ -1,12 +1,11 @@
 #if 1
-#include "App_ChatGPT.h"
-#include "../../../ChappieBsp/Chappie.h"
-LV_IMG_DECLARE(ui_img_icon_ChatGPT_png);
+#include "App_EAJ.h"
+#include "devices.h"
 
-static std::string app_name = "ChatGPT";
+static std::string app_name = "EAJ";
 static CHAPPIE* device;
 
-
+LV_IMG_DECLARE(ui_img_icon_EAJ_png);
 namespace App {
 
     /**
@@ -14,7 +13,7 @@ namespace App {
      * 
      * @return std::string 
      */
-    std::string App_ChatGPT_appName()
+    std::string App_EAJ_appName()
     {
         return app_name;
     }
@@ -25,9 +24,10 @@ namespace App {
      * 
      * @return void* 
      */
-    void* App_ChatGPT_appIcon()
+    void* App_EAJ_appIcon()
     {
-        return (void*)&ui_img_icon_ChatGPT_png;
+        return (void*) &ui_img_icon_EAJ_png;
+        // return NULL;
     }
 
 
@@ -35,17 +35,12 @@ namespace App {
      * @brief Called when App is on create
      * 
      */
-    void App_ChatGPT_onCreate()
+    void App_EAJ_onCreate()
     {
-        UI_LOG("[%s] onCreate\n", App_ChatGPT_appName().c_str());
-
+        UI_LOG("[%s] onCreate\n", App_EAJ_appName().c_str());
+        EAJPage();
         /*Create an Arc*/
-        lv_obj_t * arc = lv_arc_create(lv_scr_act());
-        lv_obj_set_size(arc, 150, 150);
-        lv_arc_set_rotation(arc, 135);
-        lv_arc_set_bg_angles(arc, 0, 270);
-        lv_arc_set_value(arc, 40);
-        lv_obj_center(arc);
+
     }
 
 
@@ -55,8 +50,9 @@ namespace App {
      * Try use millis() instead of delay() here
      * 
      */
-    void App_ChatGPT_onLoop()
+    void App_EAJ_onLoop()
     {
+        EAJ_Loop();
     }
 
 
@@ -65,9 +61,11 @@ namespace App {
      * Please remember to release the resourse like lvgl timers in this function
      * 
      */
-    void App_ChatGPT_onDestroy()
+    void App_EAJ_onDestroy()
     {
-        UI_LOG("[%s] onDestroy\n", App_ChatGPT_appName().c_str());
+        UI_LOG("[%s] onDestroy\n", App_EAJ_appName().c_str());
+        FastLED.showColor(CRGB::Black);
+        EAJ_DeInit();
     }
 
 
@@ -75,7 +73,7 @@ namespace App {
      * @brief Launcher will pass the BSP pointer through this function before onCreate
      * 
      */
-    void App_ChatGPT_getBsp(void* bsp)
+    void App_EAJ_getBsp(void* bsp)
     {
         device = (CHAPPIE*)bsp;
     }

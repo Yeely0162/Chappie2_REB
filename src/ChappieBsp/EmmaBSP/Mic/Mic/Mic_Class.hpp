@@ -22,7 +22,7 @@
 namespace m5
 {
   class M5Unified;
-  
+
   struct mic_config_t
   {
     /// i2s_data_in (for mic)
@@ -132,7 +132,7 @@ namespace m5
     {
       return _rec_raw(rec_data, array_len,  true, _cfg.sample_rate);
     }
-    
+
   protected:
 
     void setCallback(void* args, bool(*func)(void*, bool)) { _cb_set_enabled = func; _cb_set_enabled_args = args; }

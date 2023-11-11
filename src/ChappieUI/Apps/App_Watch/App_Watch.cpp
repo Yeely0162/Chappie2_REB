@@ -8,12 +8,10 @@ static std::string app_name = "Watch";
 static CHAPPIE* device;
 
 
-static std::array<_lv_obj_t**, 4> _WatchPad_List = {
-    &ui_ScreenWatchApple,
+static std::array<_lv_obj_t**, 3> _WatchPad_List = {
     &ui_ScreenWatchWarma,
     &ui_ScreenWatchThink,
     &ui_ScreenWatchLaugh,
-    
 };
 static int _WatchPad_Current = 0;
 static lv_timer_t* _timer_watch_time_update;
@@ -28,29 +26,20 @@ static void _watch_time_update(lv_timer_t * timer)
     static I2C_BM8563_TimeTypeDef rtc_time;
     static int16_t hours, minutes, seconds;
     device->Rtc.getTime(&rtc_time);
-    if (_WatchPad_Current == 0) {
-        snprintf(label_buffer, 10, "%02d", rtc_time.hours);
-        lv_label_set_text(ui_WatchAppleLabelHour, label_buffer);
-        snprintf(label_buffer, 10, ":%02d", rtc_time.minutes);
-        lv_label_set_text(ui_WatchAppleLabelMinute, label_buffer);
 
-        lv_arc_set_value(ui_WatchAppleArc,(int16_t)device->Pow.readBatVoltage());
-        snprintf(label_buffer, 4, "%02d", (int16_t)device->Env.getTemperature() - 6);
-        lv_label_set_text(TemperLabel,label_buffer);        
-    }else if (_WatchPad_Current == 1) {
+    if (_WatchPad_Current == 0) {
         snprintf(label_buffer, 10, "%d:%02d", rtc_time.hours, rtc_time.minutes);
         lv_label_set_text(ui_WatchWarmaLabel, label_buffer);
     }
-     
 
-    else if (_WatchPad_Current == 2) {
+    else if (_WatchPad_Current == 1) {
         snprintf(label_buffer, 10, "%02d", rtc_time.hours);
         lv_label_set_text(ui_WatchThinkLabelHour, label_buffer);
         snprintf(label_buffer, 10, "%02d", rtc_time.minutes);
         lv_label_set_text(ui_WatchThinkLabelMinute, label_buffer);
     }
 
-    else if (_WatchPad_Current == 3) {
+    else if (_WatchPad_Current == 2) {
         /* Change 24 to 12 */
         if (rtc_time.hours > 12) {
             rtc_time.hours -= 12;
@@ -86,7 +75,6 @@ static void _watch_time_update(lv_timer_t * timer)
             WatchLaughPointerRotate_Animation_minute(ui_WatchLaughSecond, 0);
         }
     }
-    
     
 }
 

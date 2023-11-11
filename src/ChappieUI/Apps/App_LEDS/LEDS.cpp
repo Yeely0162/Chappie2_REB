@@ -21,6 +21,7 @@ void LEDSPage(void)
     color_label = lv_label_create(ui_ScreenLEDS);
     lv_obj_set_align(color_label, LV_ALIGN_CENTER);
     lv_obj_set_style_text_color(color_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text_fmt(color_label, "Try dragging");
 
     colorwheel = lv_colorwheel_create(ui_ScreenLEDS, true);
     lv_obj_set_size(colorwheel ,200, 200);
@@ -44,9 +45,8 @@ void panel_colorwheel_event_cb(lv_event_t * e){
     if (code == LV_EVENT_VALUE_CHANGED) {
         color = lv_colorwheel_get_rgb(obj);
         uint32_t hex_value = lv_color_to32((lv_color16_t)color);
-        // printf("Red:%d Green:%d Blue:%d\n ", color.ch.red, color.ch.green, color.ch.blue);
         lv_label_set_text_fmt(color_label, "Red:%d\n\nGreen:%d\n\nBlue:%d", color.ch.red, color.ch.green, color.ch.blue);
-        FastLED.showColor(hex_value,10);
+        FastLED.showColor(CRGB(color.ch.green,color.ch.red,color.ch.blue));
     }
 }
 void panel_Onbtn_event_cb(lv_event_t * e){

@@ -1,3 +1,4 @@
 .pio
 .vscode
 src/ChappieUI/Apps/App_Synology/App_Synology.cpp
+.DS_Store

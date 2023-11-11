@@ -11,7 +11,6 @@ extern "C" {
 #endif
 
 #include "lvgl.h"
-// #include "ChappieUI\Resource\ResourcePool.h"
 
 void WatchLaughPointerRotate_Animation_hour(lv_obj_t * TargetObject, int delay);
 void WatchLaughPointerRotate_Animation_minute(lv_obj_t * TargetObject, int delay);
@@ -27,12 +26,7 @@ extern lv_obj_t * ui_WatchLaughBG;
 extern lv_obj_t * ui_WatchLaughHour;
 extern lv_obj_t * ui_WatchLaughMinute;
 extern lv_obj_t * ui_WatchLaughSecond;
-extern lv_obj_t * ui_ScreenWatchApple;
-extern lv_obj_t * ui_WatchAppleLabelHour;
-extern lv_obj_t * ui_WatchAppleLabelMinute;
-extern lv_obj_t * ui_WatchAppleArc;
-extern lv_obj_t * FlashIcon;
-extern lv_obj_t * TemperLabel;
+
 
 LV_IMG_DECLARE(ui_img_warma_png);    // assets\Warma.png
 LV_IMG_DECLARE(ui_img_think_png);    // assets\Think.png
@@ -42,7 +36,8 @@ LV_IMG_DECLARE(ui_img_laugh_minute_png);    // assets\Laugh_Minute.png
 LV_IMG_DECLARE(ui_img_laugh_second_png);    // assets\Laugh_Second.png
 LV_IMG_DECLARE(ui_img_icon_clock_png);    // assets\Icon_Clock.png
 LV_IMG_DECLARE(ui_img_icon_setting_png);    // assets\Icon_Setting.png
-LV_IMG_DECLARE(ui_img_icon_temperature_png); 
+
+
 LV_FONT_DECLARE(ui_font_MontserratBold48);
 
 

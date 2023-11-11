@@ -1,6 +1,3 @@
-// #include "Game.h"
-// #include "assets/font.h"
-// #include "assets/sounds.h"
 #include "../include/Game.h"
 #include "../include/assets/font.h"
 #include "../include/assets/sounds.h"

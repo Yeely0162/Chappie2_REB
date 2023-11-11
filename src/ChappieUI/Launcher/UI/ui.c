@@ -281,7 +281,7 @@ void ui_ScreenLauncher_screen_init(void)
     lv_obj_set_style_text_line_space(ui_LabelStateBarTime, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(ui_LabelStateBarTime, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_LabelStateBarTime, &ui_font_FontUbuntuBold16, LV_PART_MAIN | LV_STATE_DEFAULT);
-    
+
     ui_ImgBattery = lv_img_create(ui_ImgStateBar);
     lv_img_set_src(ui_ImgBattery, &ui_img_img_battery_png);
     lv_obj_set_width(ui_ImgBattery, LV_SIZE_CONTENT);   /// 32
@@ -354,16 +354,3 @@ void ui_init(void)
     ui_ScreenLauncher_screen_init();
     // lv_disp_load_scr(ui_ScreenLauncher);
 }
-// void sleep_event_cb(lv_event_t * e)
-// {
-//     lv_obj_t * obj = lv_event_get_target(e);
-//     lv_event_code_t code = lv_event_get_code(e);
-
-//     /* Into that App */
-//     if (code == LV_EVENT_PRESSED || LV_EVENT_CLICKED) {
-//         // lv_scr_load(ui_ScreenLauncher);
-//         lv_obj_add_flag(Page_Time, LV_OBJ_FLAG_HIDDEN); // hide flag
-//         // lv_scr_load(ui_PanelDesktop);
-        
-//     }
-// }

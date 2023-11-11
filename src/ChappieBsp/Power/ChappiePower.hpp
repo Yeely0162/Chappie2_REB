@@ -17,6 +17,7 @@
 #define CHAPPIE_BATM_ADC    GPIO_NUM_8
 #define CHAPPIE_BATM_EN     GPIO_NUM_18
 #define POW_LOG(format, args...) printf(format, ##args)
+
 // extern AXP173 pmu;
 class ChappiePower {
     private:
@@ -74,7 +75,6 @@ class ChappiePower {
 
 
         }
-        
         inline void powerOff()
         {   
             #if IP5Manage

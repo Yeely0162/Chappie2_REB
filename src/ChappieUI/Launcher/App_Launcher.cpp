@@ -35,7 +35,7 @@ struct DeviceStatus_t {
     bool isInTimeDisplay = false;
     bool isPowerOff =false;
     uint8_t brightness = 127;
-    uint32_t autoScreenOffTime  = 1000 * 10;
+    uint32_t autoScreenOffTime  = 20000;
     uint32_t autoScreenOffSleep = (1000 * 60) * 20;//(ms * s) * m
     uint32_t PowerOff = 1000 * 2;
 };
@@ -194,14 +194,6 @@ namespace App {
             lv_obj_t * box = lv_msgbox_create(ui_ScreenLauncher, "PowerOff", "Btn Click To PowerOff In 5 Sec.",btns, true);
             lv_obj_add_event_cb(box, power_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
             lv_obj_center(box);
-
-
-            // esp_restart();//设备重启
-            // _device->Wf.NtpTimeCorr();//NetWork Time Update
-            // if(lv_disp_get_inactive_time(NULL) > _device_status.PowerOff){
-            //     printf("Power off");
-            //     _device->Pow.powerOff();
-            // }
         }
 
         /* Device status manage */
@@ -227,6 +219,7 @@ namespace App {
                 _device->Lcd.setBrightness(i*10);
                 delay(40);
             }
+            _device->Vibrator.Buzzzzz(100);
             onDestroy();
             _device->Pow.powerOff();
             
@@ -401,10 +394,7 @@ namespace App {
         gpio_wakeup_enable(GPIO_NUM_21, GPIO_INTR_LOW_LEVEL);
         esp_sleep_enable_gpio_wakeup();
         /* Hold untill button released */
-        while (gpio_get_level(GPIO_NUM_0) == 0) {
-             
-                delay(20); 
-        }
+        while (gpio_get_level(GPIO_NUM_0) == 0) {delay(20); }
 
         // /* Go to sleep */
         esp_light_sleep_start();

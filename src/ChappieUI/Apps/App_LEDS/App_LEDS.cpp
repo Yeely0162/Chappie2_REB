@@ -40,7 +40,6 @@ namespace App {
         UI_LOG("[%s] onCreate\n", App_LEDS_appName().c_str());
         LEDSPage();
         /*Create an Arc*/
-
     }
 
 

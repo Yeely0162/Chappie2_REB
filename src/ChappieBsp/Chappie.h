@@ -17,28 +17,19 @@
 #include "ENV/ChappieENV.hpp"
 #include "Utility/BM8563/I2C_BM8563.h"
 #include "Lvgl/ChappieLvgl.hpp"
-//  Network
 #include "ChappieNet/WiFi/ConfigWiFi.h"
-//Resoure 
 #include "ChappieUI/Resource/ResourcePool.h"
 class CHAPPIE : public EMMA {
     private:
         
     public:
         const std::string Logo = R"(
-  ___ _  _  __  ____ ____ __ ____ 
- / __) )( \/ _\(  _ (  _ (  |  __)
-( (__) __ (    \) __/) __/)( ) _) 
- \___)_)(_|_/\_(__) (__) (__|____)
- 
+.-..-.  .--.  .-.   .-..----..-.  .-..-. .-. 
+| ' /  / {} \ } |   { || }`-' \ \/ / { {_} | 
+| . \ /  /\  \} '--.| }| },-.  `/ }  | { } } 
+`-'`-``-'  `-'`----'`-'`----'  `-'   `-' `-' 
 )";
-        const std::string Yeely = R"(
- _  _  ____  ____  __   _  _ 
-( \/ )( ___)( ___)(  ) ( \/ )
- \  /  )__)  )__)  )(__ \  / 
- (__) (____)(____)(____)(__) 
- 
-)";
+
         ChappieCTP Tp;
 
         ChappieIMU Imu;
@@ -53,11 +44,10 @@ class CHAPPIE : public EMMA {
 
         ChappieENV Env;
 
-        // Net --WiFi --Bluet 
         ConfigWiFi Wf;
 
         void init();
-    
+
 };
 
 

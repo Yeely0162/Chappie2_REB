@@ -21,12 +21,7 @@ lv_obj_t * ui_WatchLaughBG;
 lv_obj_t * ui_WatchLaughHour;
 lv_obj_t * ui_WatchLaughMinute;
 lv_obj_t * ui_WatchLaughSecond;
-lv_obj_t * ui_ScreenWatchApple;
-lv_obj_t * ui_WatchAppleLabelHour;
-lv_obj_t * ui_WatchAppleLabelMinute;
-lv_obj_t * ui_WatchAppleArc;
-lv_obj_t * FlashIcon;
-lv_obj_t * TemperLabel;
+
 ///////////////////// TEST LVGL SETTINGS ////////////////////
 #if LV_COLOR_DEPTH != 16
     #error "LV_COLOR_DEPTH should be 16bit to match SquareLine Studio's settings"
@@ -106,7 +101,6 @@ void ui_ScreenWatchWarma_screen_init(void)
     lv_obj_set_style_text_font(ui_WatchWarmaLabel, &ui_font_MontserratBold48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
 }
-
 void ui_ScreenWatchThink_screen_init(void)
 {
     ui_ScreenWatchThink = lv_obj_create(NULL);
@@ -195,80 +189,15 @@ void ui_ScreenWatchLaugh_screen_init(void)
     lv_img_set_angle(ui_WatchLaughSecond, 1);
 
 }
-void ui_ScreenWatchApple_screen_init(void){
-        
-    ui_ScreenWatchApple = lv_obj_create(NULL);
-    lv_obj_clear_flag(ui_ScreenWatchApple, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_ScreenWatchApple, lv_color_hex(0x0000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_ScreenWatchApple, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_WatchAppleLabelHour = lv_label_create(ui_ScreenWatchApple);
-    lv_label_set_text(ui_WatchAppleLabelHour,"22");
-    lv_obj_set_x(ui_WatchAppleLabelHour, -15);
-    lv_obj_set_y(ui_WatchAppleLabelHour, 25);
-    lv_obj_set_align(ui_WatchAppleLabelHour,LV_FLEX_ALIGN_SPACE_EVENLY);
-    lv_obj_set_style_text_font(ui_WatchAppleLabelHour,&ui_font_FontUbuntuBold96,LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(ui_WatchAppleLabelHour,lv_color_hex(0x53DE77),LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_add_flag(ui_WatchAppleLabelHour, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
-    lv_obj_clear_flag(ui_WatchAppleLabelHour, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
-    ui_WatchAppleLabelMinute  = lv_label_create(ui_ScreenWatchApple);
-    lv_obj_set_x(ui_WatchAppleLabelMinute, -20);
-    lv_obj_set_y(ui_WatchAppleLabelMinute, 125);
-    lv_label_set_text(ui_WatchAppleLabelMinute,":09");
-    lv_obj_set_align(ui_WatchAppleLabelMinute,LV_FLEX_ALIGN_SPACE_EVENLY);
-    lv_obj_set_style_text_font(ui_WatchAppleLabelMinute,&ui_font_FontUbuntuBold96,LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(ui_WatchAppleLabelMinute,lv_color_hex(0x53DE77),LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_add_flag(ui_WatchAppleLabelMinute, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
-    lv_obj_clear_flag(ui_WatchAppleLabelMinute, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
-    ui_WatchAppleArc = lv_arc_create(ui_ScreenWatchApple);
-    lv_obj_set_align(ui_WatchAppleArc,LV_FLEX_ALIGN_START);
-    lv_obj_set_x(ui_WatchAppleArc, 20);
-    lv_obj_set_y(ui_WatchAppleArc, 25);
-    lv_obj_set_size(ui_WatchAppleArc, 80,80);
-    lv_arc_set_bg_angles(ui_WatchAppleArc, 0, 360);
-    lv_obj_set_style_arc_color(ui_WatchAppleArc,lv_color_hex(0x4C4C4C),LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_arc_set_value(ui_WatchAppleArc,15);
-    lv_arc_set_rotation(ui_WatchAppleArc,270);
-    lv_obj_set_style_arc_color(ui_WatchAppleArc,lv_color_hex(0x62CF6B),LV_PART_INDICATOR);
-    lv_obj_remove_style(ui_WatchAppleArc, NULL, LV_PART_KNOB);   /*Be sure the knob is not displayed*/
-    lv_obj_clear_flag(ui_WatchAppleArc, LV_OBJ_FLAG_CLICKABLE);  /*To not allow adjusting by click*/
-    
-
-    FlashIcon = lv_img_create(ui_WatchAppleArc);
-    lv_img_set_src(FlashIcon, &ui_img_img_Charing_png);
-    lv_obj_set_width(FlashIcon, 20);
-    lv_obj_set_height(FlashIcon, 20);
-    lv_obj_set_align(FlashIcon, LV_ALIGN_CENTER);
-    lv_img_set_zoom(FlashIcon,400);
-
-    lv_obj_t * temperature = lv_img_create(ui_ScreenWatchApple);
-    lv_img_set_src(temperature, &ui_img_icon_temperature_png);
-    lv_obj_set_x(temperature, 73);
-    lv_obj_set_y(temperature, -50);
-    lv_obj_set_align(temperature, LV_FLEX_ALIGN_SPACE_AROUND);
-    
-    TemperLabel =  lv_label_create(ui_ScreenWatchApple);
-    lv_obj_set_x(TemperLabel, 20);
-    lv_obj_set_y(TemperLabel, -40);
-    lv_label_set_text(TemperLabel,"30");
-    lv_obj_set_style_text_color(TemperLabel,lv_color_hex(0x53DE77),LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(TemperLabel,&ui_font_MontserratBold48,LV_PART_MAIN | LV_STATE_DEFAULT);
-    
-    lv_obj_set_align(TemperLabel, LV_FLEX_ALIGN_SPACE_AROUND);
-    // lv_obj_add_event_cb(ui_ScreenWatchApple,sleep_event_cb,LV_EVENT_PRESSED,NULL);
-}
 void watch_ui_init(void)
 {
     // lv_disp_t * dispp = lv_disp_get_default();
     // lv_theme_t * theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED),
     //                                            false, LV_FONT_DEFAULT);
     // lv_disp_set_theme(dispp, theme);
-    ui_ScreenWatchApple_screen_init();
     ui_ScreenWatchWarma_screen_init();
     ui_ScreenWatchThink_screen_init();
     ui_ScreenWatchLaugh_screen_init();
-    
     // lv_disp_load_scr(ui_ScreenWatchWarma);
 }

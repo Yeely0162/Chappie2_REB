@@ -1,7 +1,7 @@
 #if 1
 #include "App_Settings.h"
 #include "../../../ChappieBsp/Chappie.h"
-#define VERSION_BUILD_TIME    __DATE__"-"__TIME__
+#define VERSION_BUILD_TIME    __DATE__ "-" __TIME__
 void Status_update(lv_timer_t * timer);
 static std::string app_name = "Settings";
 static CHAPPIE* device;
@@ -60,7 +60,7 @@ void Status_update(lv_timer_t * timer)
 {
     Content_Update(wifiInfo.connect,device->Wf.isConnected() ? "Connected" : "Disconnected");
     Content_Update(wifiInfo.IP,device->Wf.LocalIP().c_str());
-    // Content_Update(wifiInfo.IPv6,device->Wf.GetIPv6().c_str());
+    Content_Update(wifiInfo.IPv6,device->Wf.GetIPv6().c_str());
     Content_Update(wifiInfo.GateWay,device->Wf.GateWay().c_str());
     Content_Update(wifiInfo.WiFi_Name,device->Wf.WiFiN());
     Content_Update(wifiInfo.Mac,device->Wf.WiFiMac());
@@ -116,7 +116,7 @@ void SettingPage(void)
     // printf("AP child ID:%d",lv_obj_get_index(AP_switch));
     wifiInfo.WiFi_Name=ContentBox(section,"WiFi:",device->Wf.WiFiN());
     wifiInfo.IP=ContentBox(section,"IP:",device->Wf.LocalIP().c_str());
-    // wifiInfo.IPv6=ContentBox(section,"IPv6:",device->Wf.GetIPv6().c_str());
+    wifiInfo.IPv6=ContentBox(section,"IPv6:",device->Wf.GetIPv6().c_str());
     wifiInfo.GateWay=ContentBox(section,"GyIP:",device->Wf.GateWay().c_str());
     wifiInfo.Mac=ContentBox(section,"MAC:",device->Wf.WiFiMac());
     
@@ -172,7 +172,7 @@ void SettingPage(void)
     // lv_obj_align_to(cont_col, cont_row, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
     
     ContentBox(section,"Fir:","Chappie 2");
-    ContentBox(section,"Code:","Yeely");
+    ContentBox(section,"Code:","Kalicyh");
     ContentBox(section,"LVGL:",LVGL_VERSION_INFO);
     ContentBox(section,"Build:",VERSION_BUILD_TIME);
     ContentBox(section,"Ver: ","V1.1");
@@ -403,7 +403,7 @@ namespace App {
 
     /**
      * @brief Return the App name laucnher, which will be show on launcher App list
-     *  
+     * 
      * @return std::string 
      */
     std::string App_Settings_appName()
@@ -433,7 +433,6 @@ namespace App {
     {
         UI_LOG("\n[%s] onCreate\n", App_Settings_appName().c_str());
         SettingPage();
-        
         /*Create a list*/
         
 

@@ -1,6 +1,6 @@
 import os as os
 from shutil import copyfile
-# 名字太长可能导致导入照片到ICON里，系统会复位问题，我也不知道为什么！
+
 
 app_name = ""
 def getAppName():
