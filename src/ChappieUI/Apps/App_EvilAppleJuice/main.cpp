@@ -7,7 +7,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 
-#include "devices.hpp"
+#include <devices.h>
 
 BLEAdvertising *pAdvertising;
 uint32_t delayMilliseconds = 1000;

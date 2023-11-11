@@ -2,10 +2,10 @@
 #define CONFIGWIFI_H
 #include <WiFi.h> // 引入 WiFi 库
 // #include "WiFiClient.h"
-#include "ChappieBsp\Utility\BM8563\I2C_BM8563.h"
+#include "ChappieBsp/Utility/BM8563/I2C_BM8563.h"
 #include <DNSServer.h>
 #include <WebServer.h>
-#include"HttpClient.h"
+#include <HttpClient.h>
 #include <ESPmDNS.h>  //用于设备域名 MDNS.begin("esp32")
 // #include <esp_wifi.h> //用于esp_wifi_restore() 删除保存的wifi信息
 #include <Preferences.h> //用于参数数据的
