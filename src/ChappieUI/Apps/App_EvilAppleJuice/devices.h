@@ -3,7 +3,6 @@
 #include <Arduino.h>
 #include "../../../ChappieBsp/Chappie.h"
 #include "../FastLED/src/FastLED.h"
-void EAJPage();
 void EAJ_Loop();
 void EAJ_DeInit();
 /*
