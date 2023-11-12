@@ -1,5 +1,11 @@
+#if 1
+#pragma once
 #include <Arduino.h>
-
+#include "../../../ChappieBsp/Chappie.h"
+#include "../FastLED/src/FastLED.h"
+void EAJPage();
+void EAJ_Loop();
+void EAJ_DeInit();
 /*
   These are audio devices: wireless headphones / earbuds
   It seems these need a shorter range between ESP & iDevice
@@ -71,3 +77,5 @@ const uint8_t SHORT_DEVICES[][23] = {
   // TV Color Balance
   {0x16, 0xff, 0x4c, 0x00, 0x04, 0x04, 0x2a, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xc1, 0x1e, 0x60, 0x4c, 0x95, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00},
 };
+
+#endif

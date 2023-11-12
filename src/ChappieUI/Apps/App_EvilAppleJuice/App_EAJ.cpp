@@ -65,7 +65,7 @@ namespace App {
     {
         UI_LOG("[%s] onDestroy\n", App_EAJ_appName().c_str());
         FastLED.showColor(CRGB::Black);
-        EAJ_DeInit();
+        //EAJ_DeInit();
     }
 
 

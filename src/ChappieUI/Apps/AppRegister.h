@@ -39,8 +39,6 @@
 #include "App_Dino/App_Dino.h"
 #include "App_FFT/App_FFT.h"
 #include "App_ESPNOW/App_ESPNOW.h"
-#include "App_WifiTV/App_WifiTV.h"
-#include "App_Gamepad/App_Gamepad.h"
 #include "App_LEDS/App_LEDS.h"
 #include "App_Noiser/App_Noiser.h"
 #include "App_Menu/App_Menu.h"
@@ -66,8 +64,6 @@ namespace App {
         App_Login(Noiser),
 		App_Login(FFT),
 		App_Login(ESPNOW),
-		App_Login(WifiTV),
-		App_Login(Gamepad),
         App_Login(Menu),
         App_Login(Settings),
 		/* Login locator */

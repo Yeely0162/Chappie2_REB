@@ -7,19 +7,19 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 
-#include <devices.h>
+#include "devices.h"
 
 BLEAdvertising *pAdvertising;
 uint32_t delayMilliseconds = 1000;
 
-void setup() {
+void EAJPage() {
   Serial.begin(115200);
   Serial.println("Starting ESP32 BLE");
 
   // 这是特定于AirM2M ESP32板的
   // https://wiki.luatos.com/chips/esp32c3/board.html
-  pinMode(12, OUTPUT);
-  pinMode(13, OUTPUT);
+  //pinMode(12, OUTPUT);
+  //pinMode(13, OUTPUT);
 
   BLEDevice::init("AirPods 69");
 
@@ -32,10 +32,10 @@ void setup() {
   pAdvertising->setDeviceAddress(null_addr, BLE_ADDR_TYPE_RANDOM);
 }
 
-void loop() {
+void EAJ_Loop() {
   // 在“繁忙”部分打开灯光
-  digitalWrite(12, HIGH);
-  digitalWrite(13, HIGH);
+  //digitalWrite(12, HIGH);
+  //digitalWrite(13, HIGH);
 
   // 首先生成虚假的随机MAC地址
   esp_bd_addr_t dummy_addr = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -103,8 +103,8 @@ void loop() {
   pAdvertising->start();
 
   // 在休眠的时候关灯
-  digitalWrite(12, LOW);
-  digitalWrite(13, LOW);
+  //digitalWrite(12, LOW);
+  //digitalWrite(13, LOW);
   delay(delayMilliseconds); // 延迟
   pAdvertising->stop();
 }
