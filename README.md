@@ -41,7 +41,7 @@
 |     App_Lunch      | App主界面（非必要别修改） | 时间，日期，时间更新，wifi按钮，自动休眠时间 |       更新时间会卡住页面2S        |  ✔️   |
 |    StupidSnake     |        贪吃蛇游戏         |                    修复了无法移动问题                    | 无 |  ✔️   |
 |       Watch        |           表盘            |       创建了新表盘（仿iwatch充电表盘）       |  请不用连续快速进退Watch，会BooM  |  --  |
-|    AppleJuice     |        苹果弹出攻击(By kaliCYH)         |                    创建了攻击主页面                    | 暂无 |  ✔️   |
+|    AppleJuice     |        苹果弹出攻击(kaliCYH)         |                    创建了攻击主页面                    | 暂无 |  ✔️   |
 
 
 #### 群晖配置注意
