@@ -223,6 +223,7 @@ namespace App {
             lv_disp_trig_activity(NULL);           
         }
         if(_device_status.isPowerOff && lv_disp_get_inactive_time(NULL) > _device_status.PowerOff){
+            _device->Vibrator.Buzzzzz(300);
             for(int i =5;i>=0;i--){
                 _device->Lcd.setBrightness(i*10);
                 delay(40);
