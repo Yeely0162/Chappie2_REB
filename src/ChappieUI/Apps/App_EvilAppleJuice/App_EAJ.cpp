@@ -101,6 +101,9 @@ void EAJ_start() {
         pAdvertising->setMaxInterval(0x20);
         pAdvertising->setMinPreferred(0x20);
         pAdvertising->setMaxPreferred(0x20);
+        esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P21);
+        esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN, ESP_PWR_LVL_P21);
+        esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P21);
     }
     // 开始广播
     Serial.println("Sending Advertisement...");
