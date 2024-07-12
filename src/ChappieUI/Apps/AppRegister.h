@@ -46,6 +46,7 @@
 #include "App_Synology/App_Synology.h"
 #include "App_ChatGPT/App_ChatGPT.h"
 #include "App_EvilAppleJuice/App_EAJ.h"
+#include "App_Thermal/App_IRTI.h"
 /* Header files locator */
 /* Don't remove this, or python script's auto login will be failed */
 
@@ -60,6 +61,7 @@ namespace App {
          * 
          */
         App_Login(Watch),
+		App_Login(IRTI),
 		App_Login(EAJ),
 		App_Login(Noiser),
 		App_Login(LEDS),
