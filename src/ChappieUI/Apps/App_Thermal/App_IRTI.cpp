@@ -31,6 +31,10 @@ namespace App {
         // return NULL;
     }
 
+    void App_draw_heat_image(bool re_mapcolor=true) {
+        // ...修改这个函数以使用您的显示抽象和硬件...
+    }
+
 
     /**
      * @brief Called when App is on create

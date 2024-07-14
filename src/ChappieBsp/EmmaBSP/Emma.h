@@ -20,6 +20,7 @@
 #include "Display/EmmaDisplay.hpp"
 #include "Vibrator/EmmaVibrator.hpp"
 #include "Speaker/EmmaSpeaker.hpp"
+#include "Thermal/EmmaThermal.hpp"
 
 
 /* ANSI colors */
@@ -88,6 +89,11 @@ class EMMA {
         /* Module Speaker */
         #if EMMA_MODULE_SPEAKER
         EmmaSpeaker Speaker;
+        #endif
+
+        /* Module Thermal */
+        #if EMMA_MODULE_Thermal
+        EmmaThermal Thermal;
         #endif
 
         /**

@@ -94,4 +94,12 @@
     /* More configs in Speaker/EmmaSpeaker.hpp */
 #endif
 
+/* Enable module Thermal */
+#define EMMA_MODULE_Thermal            1
+#if EMMA_MODULE_Thermal
+    #define EMMA_Thermal_MLX_VDD_PIN  40
+    #define EMMA_Thermal_MLX_SDA_PIN  41
+    #define EMMA_Thermal_MLX_SCL_PIN  42
+#endif
+
 #endif
