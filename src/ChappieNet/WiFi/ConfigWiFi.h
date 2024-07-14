@@ -1,7 +1,7 @@
 #ifndef CONFIGWIFI_H
 #define CONFIGWIFI_H
 #include <WiFi.h> // 引入 WiFi 库
-#include "ChappieBsp\Utility\BM8563\I2C_BM8563.h"
+#include "ChappieBsp/Utility/BM8563/I2C_BM8563.h"
 #include <DNSServer.h>
 #include <WebServer.h>
 #include "HttpClient.h"

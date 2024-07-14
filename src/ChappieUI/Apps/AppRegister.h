@@ -39,11 +39,11 @@
 #include "App_Dino/App_Dino.h"
 #include "App_FFT/App_FFT.h"
 #include "App_ESPNOW/App_ESPNOW.h"
-#include "App_WifiTV/App_WifiTV.h"
+// #include "App_WifiTV/App_WifiTV.h"
 #include "App_Gamepad/App_Gamepad.h"
 #include "App_LEDS/App_LEDS.h"
 #include "App_Noiser/App_Noiser.h"
-#include "App_Synology/App_Synology.h"
+// #include "App_Synology/App_Synology.h"
 #include "App_ChatGPT/App_ChatGPT.h"
 #include "App_EvilAppleJuice/App_EAJ.h"
 #include "App_Thermal/App_IRTI.h"
@@ -65,13 +65,13 @@ namespace App {
 		App_Login(EAJ),
 		App_Login(Noiser),
 		App_Login(LEDS),
-		App_Login(Synology),
+		// App_Login(Synology),
 		App_Login(ChatGPT),
 		App_Login(StupidSnake),
 		App_Login(Dino),
 		App_Login(FFT),
 		App_Login(ESPNOW),
-		App_Login(WifiTV),
+		// App_Login(WifiTV),
 		App_Login(Gamepad),
 		App_Login(Settings),
 		

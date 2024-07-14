@@ -102,7 +102,7 @@ void CHAPPIE::init()
     Sd.init();
     
     /* Init BMP280 */
-    Env.init();
+    // Env.init();
     
     
     /* Fire up */
