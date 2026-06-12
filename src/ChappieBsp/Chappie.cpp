@@ -94,6 +94,7 @@ void CHAPPIE::init()
     
     Lcd.printf("Tp init success!\n");
     Wf.Init();
+    Ble.Init();
     /* Init RTC */
     Rtc.begin();
     /* Init IMU */

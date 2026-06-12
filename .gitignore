@@ -3,3 +3,5 @@
 src/ChappieUI/Apps/App_Synology/App_Synology.cpp
 src/.DS_Store
 .DS_Store
+src/ChappieUI/Apps/App_ClaudeBuddy
+.codewhale

@@ -21,6 +21,12 @@ static struct {
     lv_obj_t * BatPower;
     lv_obj_t * USBCharing;
 }powInfo;
+static struct {
+    lv_obj_t * status;
+    lv_obj_t * name;
+    lv_obj_t * addr;
+    lv_obj_t * passkey;
+}bleInfo;
 LV_IMG_DECLARE(ui_img_icon_setting_png);
 static lv_obj_t * setting_list,*sub_wifi_page;
 static lv_style_t EXIT_btn_style;
@@ -37,6 +43,7 @@ static void switch_handler(lv_event_t * e);
 lv_obj_t * root_page;
 static void WiFi_AP_Switch_Handler(lv_event_t * e);
 static void WiFi_Switch_Handler(lv_event_t * e);
+static void BLE_Switch_Handler(lv_event_t * e);
 static void Bright_event_cb(lv_event_t * e);
 static lv_obj_t * create_text(lv_obj_t * parent, const void * icon, const char * txt,
                                         lv_menu_builder_variant_t builder_variant);
@@ -72,6 +79,14 @@ void Status_update(lv_timer_t * timer)
         Content_Update(powInfo.BatVolt,(device->Pow.BatVoltage()+"V").c_str());
         Content_Update(powInfo.USBCharing,device->Pow.isCharing() ? "Charing" : "Discharge");
     #endif
+
+    // BLE page
+    Content_Update(bleInfo.status, device->Ble.isEnabled() ? (device->Ble.isConnected() ? "Connected" : "Enabled") : "Disabled");
+    Content_Update(bleInfo.name, device->Ble.getDeviceName().c_str());
+    Content_Update(bleInfo.addr, device->Ble.getConnectedAddress().length() > 0 ? device->Ble.getConnectedAddress().c_str() : "None");
+    uint32_t pk = device->Ble.getPasskey();
+    if (pk > 0) { char pkStr[8]; snprintf(pkStr, sizeof(pkStr), "%06lu", (unsigned long)pk); Content_Update(bleInfo.passkey, pkStr); }
+    else { Content_Update(bleInfo.passkey, "N/A"); }
 }
 
 
@@ -126,15 +141,19 @@ void SettingPage(void)
     lv_obj_set_style_pad_hor(sub_bluetooth_page, lv_obj_get_style_pad_left(lv_menu_get_main_header(menu), 0), 0);
     lv_menu_separator_create(sub_bluetooth_page);
     section = lv_menu_section_create(sub_bluetooth_page);
-    create_slider(section, LV_SYMBOL_SETTINGS, "Velocity", 0, 150, 120);
-    create_slider(section, LV_SYMBOL_SETTINGS, "Acceleration", 0, 150, 50);
-    create_slider(section, LV_SYMBOL_SETTINGS, "Weight limit", 0, 150, 80);
+    lv_obj_t * BLE_switch = create_switch(section, LV_SYMBOL_BLUETOOTH, "Bluetooth", device->Ble.isEnabled());
+    lv_obj_add_event_cb(lv_obj_get_child(BLE_switch, 2), BLE_Switch_Handler, LV_EVENT_CLICKED, section);
+    bleInfo.status = ContentBox(section, "Status:", device->Ble.isEnabled() ? (device->Ble.isConnected() ? "Connected" : "Enabled") : "Disabled");
+    bleInfo.name = ContentBox(section, "Name:", device->Ble.getDeviceName().c_str());
+    bleInfo.addr = ContentBox(section, "Addr:", "None");
+    bleInfo.passkey = ContentBox(section, "Passkey:", "N/A");
 
     lv_obj_t * sub_time_page = lv_menu_page_create(menu, NULL);
     lv_obj_set_style_pad_hor(sub_time_page, lv_obj_get_style_pad_left(lv_menu_get_main_header(menu), 0), 0);
     lv_menu_separator_create(sub_time_page);
     section = lv_menu_section_create(sub_time_page);
-    create_switch(section, NULL, "Auto Time Mode", true);
+    create_switch(section, LV_SYMBOL_REFRESH, "NTP Auto Sync", device->Wf.AutoTime);
+    ContentBox(section, "NTP:", "ntp.aliyun.com");
     
     lv_obj_t * sub_display_page = lv_menu_page_create(menu, NULL);
     lv_obj_set_style_pad_hor(sub_display_page, lv_obj_get_style_pad_left(lv_menu_get_main_header(menu), 0), 0);
@@ -313,6 +332,25 @@ static void WiFi_Switch_Handler(lv_event_t * e)
 
     }
 }
+static void BLE_Switch_Handler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t * obj = lv_event_get_target(e);
+    if(code == LV_EVENT_VALUE_CHANGED || code == LV_EVENT_CLICKED) {
+        if (lv_obj_has_state(obj, LV_STATE_CHECKED)){
+            if(!device->Ble.isEnabled()){
+                device->Ble.enable();
+                BLE_LOG("BLE enabled from settings\n");
+            }
+        } else {
+            device->Ble.disable();
+            BLE_LOG("BLE disabled from settings\n");
+        }
+        // Update status immediately
+        Content_Update(bleInfo.status, device->Ble.isEnabled() ? (device->Ble.isConnected() ? "Connected" : "Enabled") : "Disabled");
+    }
+}
+
 static void switch_handler(lv_event_t * e)
 {
     lv_event_code_t code = lv_event_get_code(e);

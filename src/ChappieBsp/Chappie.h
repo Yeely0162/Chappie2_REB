@@ -19,6 +19,7 @@
 #include "Lvgl/ChappieLvgl.hpp"
 //  Network
 #include "ChappieNet/WiFi/ConfigWiFi.h"
+#include "ChappieNet/BLE/ConfigBLE.h"
 //Resoure 
 #include "ChappieUI/Resource/ResourcePool.h"
 class CHAPPIE : public EMMA {
@@ -53,11 +54,10 @@ class CHAPPIE : public EMMA {
 
         ChappieENV Env;
 
-        // Net --WiFi --Bluet 
+        // Net --WiFi --Bluetooth
         ConfigWiFi Wf;
+        ConfigBLE Ble;
 
         void init();
     
 };
-
-

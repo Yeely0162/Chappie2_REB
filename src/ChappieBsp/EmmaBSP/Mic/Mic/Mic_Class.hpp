@@ -25,6 +25,8 @@ namespace m5
   
   struct mic_config_t
   {
+    
+
     /// i2s_data_in (for mic)
     int pin_data_in = -1;
 
@@ -72,11 +74,14 @@ namespace m5
 
     /// I2S port
     i2s_port_t i2s_port = i2s_port_t::I2S_NUM_0;
+    
+    
   };
 
   class Mic_Class
   {
 //   friend M5Unified;
+  private:  
 
   public:
 

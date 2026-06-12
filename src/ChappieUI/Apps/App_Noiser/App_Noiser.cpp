@@ -9,19 +9,15 @@ static std::string app_name = "Noiser";
 LV_IMG_DECLARE(ui_img_icon_ear_png);
 
 
-// #include "arduinoFFT.h"
-// static arduinoFFT  FFT;
 #define MIC_BAR_WIDTH  14
 #define MIC_BAR_HEIGHT 21
 #define NUM_BARS 14
-#define STANDER_VALUE 840
-#define GAIN -25
-// const double    samplingFrequency = 48000;
-const uint16_t  _samples = 256; //This value MUST ALWAYS be a power of 2
-static double* _vReal;
-static int16_t* _rawData;
+const uint16_t  _samples = 256;
+int16_t* _vReal;
+static float _smoothDb = 30.0f;
+static int _noiseBarValue = 0;
 static lv_obj_t * contentbox;
-static lv_obj_t * decibel; //decibel text
+static lv_obj_t * decibel;
 static lv_timer_t* _noiser_update;
 static lv_timer_t* _time_update;
 static void Noiser_update(lv_timer_t * timer);
@@ -74,8 +70,7 @@ void StatusNoise(bool value ){
 }
 void NoiserPage(void)
 {
-    _vReal      = new double[_samples];
-    _rawData  = new int16_t[_samples];
+    _vReal      = new int16_t[_samples];
     static lv_obj_t *UI_Noiser;
     UI_Noiser = lv_scr_act();
     lv_obj_clear_flag(UI_Noiser, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
@@ -84,7 +79,6 @@ void NoiserPage(void)
     lv_obj_set_style_bg_color(UI_Noiser, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(UI_Noiser, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_align(UI_Noiser, LV_ALIGN_CENTER);
-
     create_mic_bars(UI_Noiser);
 
     lv_obj_t * title = lv_label_create(UI_Noiser);
@@ -126,11 +120,12 @@ void NoiserPage(void)
     lv_img_set_src(warmingIcon, ResourcePool::GetImage("warming_dark"));
     lv_obj_add_flag(warmingIcon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(warming, LV_OBJ_FLAG_HIDDEN);
-    _noiser_update = lv_timer_create(Noiser_update, 300,NULL);
-    Noiser_update(_noiser_update);     // status bar time update
 
-    _time_update = lv_timer_create(Time_update, 1000,NULL);
-    Time_update(_time_update);     // status bar time update
+    device->Mic.begin();
+    _noiser_update = lv_timer_create(Noiser_update, 300,NULL);
+    Noiser_update(_noiser_update);
+    _time_update = lv_timer_create(Time_update, 500,NULL);
+    Time_update(_time_update);
 }
 
 
@@ -144,60 +139,48 @@ void Time_update(lv_timer_t * timer){
     
 }
 
-double calculateDecibels(double *vReal, uint16_t samples) {
-    double sum = 0.0;
-    for (int i = 0; i < samples; i++){
-        // printf("%.2f,",vReal[i]);
-        double diff = abs(vReal[i] - STANDER_VALUE);
-        sum += diff * diff;
-    }
-    double rms = sqrt(sum / (double)samples);
-    double dB = 20 * log10(rms / 0.01f) + GAIN;
-
-    return dB;
-}
-// double calculateDecibels(double *vReal, uint16_t samples) {
-//     double sum = 0.0;
-//     for (int i = 0; i < samples / 2; i++){
-//         // printf("%.2f,",vReal[i]);
-//         double diff = abs(vReal[i] - STANDER_VALUE);
-//         sum += diff * diff;
-//     }
-//     double rms = sqrt(sum / (double)samples);
-//     double dB = 20 * log10(rms / 0.001f) + GAIN;
-
-//     return dB;
-// }
+// =====================================================================
+//  Fixed noise calculation algorithm
+//  MSM261D4030H1CPM PDM MEMS microphone
+//  Sensitivity: -26 dBFS at 94 dB SPL (1 kHz, 1 Pa)
+//  SPL formula: dBSPL = 20 * log10(RMS/32767) + 120
+// =====================================================================
 void Noiser_update(lv_timer_t * timer)
 {
+    if (device->Mic.record(_vReal, _samples)) {
+        // 1) Remove DC offset
+        int32_t sum = 0;
+        for (int i = 0; i < _samples; i++) sum += _vReal[i];
+        float dc = (float)sum / (float)_samples;
 
-    // 麦克风型号为: MSM261D4030H1CPM
-    device->Mic.record(_rawData, _samples); //录制声音
-    while (device->Mic.isRecording()); //当录制完成时
-    
-    /* Copy data */
-    for (int i = 0; i < _samples; i++) {
-        _vReal[i] = (double)_rawData[i]; //将数据丢入实部数组
-        // printf("%.2f,",_vReal[i]);
+        // 2) Calculate RMS of AC component (actual sound)
+        float sumSq = 0.0f;
+        for (int i = 0; i < _samples; i++) {
+            float ac = (float)_vReal[i] - dc;
+            sumSq += ac * ac;
+        }
+        float rms = sqrtf(sumSq / (float)_samples);
+        if (rms < 1.0f) rms = 1.0f;
+
+        // 3) Convert to dB SPL
+        // At 94 dB SPL, output is at -26 dBFS → RMS = 1638
+        // dBSPL = 20*log10(RMS/32767) + 120
+        float db = 20.0f * log10f(rms / 32767.0f) + 120.0f;
+        if (db < 30.0f) db = 30.0f;
+        if (db > 120.0f) db = 120.0f;
+
+        // 4) Smooth for stable display (70% old + 30% new)
+        _smoothDb = _smoothDb * 0.7f + db * 0.3f;
+        _noiseBarValue = (int)_smoothDb;
+    } else {
+        _noiseBarValue = 0;
     }
-    
-    /* FFT */
-    // ArduinoFFT库 
-    // FFT = arduinoFFT(_vReal, _vImag, _samples, samplingFrequency);
-    // FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-    // FFT.Compute(FFT_FORWARD);
-    // FFT.ComplexToMagnitude();
-    // 
-    // FFT.Windowing(FFT_WIN_TYP_HANN, FFT_FORWARD);
-    // FFT.Compute(FFT_FORWARD);
-    // FFT.ComplexToMagnitude();
-    
-    // // 计算噪声分贝级别
-    
-    int16_t soundLevel = calculateDecibels(_vReal, _samples);
+
+    int soundLevel = _noiseBarValue;
     for (int i = 0; i < NUM_BARS; i++) {
-        if( i <= (soundLevel / 10 ) ){
-            if(  soundLevel < 75 ){
+        int level =(int)soundLevel;
+        if( i <= ( level/ 10 ) ){
+            if(  level < 75 ){
                 StatusNoise(true);
                 lv_obj_set_style_bg_color(mic_bars[i],lv_color_hex(0x53DE77),0);
                 lv_obj_set_style_bg_opa(mic_bars[i], 255, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -222,78 +205,37 @@ void Noiser_deinit()
     lv_timer_del(_noiser_update);
     lv_timer_del(_time_update);
     delete [] _vReal;
-    delete _rawData;
 }
 
 
 namespace App {
 
-    /**
-     * @brief Return the App name laucnher, which will be show on launcher App list
-     * 
-     * @return std::string 
-     */
     std::string App_Noiser_appName()
     {
         return app_name;
     }
 
-
-    /**
-     * @brief Return the App Icon laucnher, NULL for default
-     * 
-     * @return void* 
-     */
     void* App_Noiser_appIcon()
     {
-        // return NULL;
         return (void*) &ui_img_icon_ear_png;
     }
 
-
-    /**
-     * @brief Called when App is on create
-     * 
-     */
     void App_Noiser_onCreate()
     {
         UI_LOG("[%s] onCreate\n", App_Noiser_appName().c_str());
-
-        /*Create an Arc*/
         NoiserPage();
-        // Noiser_Loop();
-
     }
 
-
-    /**
-     * @brief Called repeatedly, end this function ASAP! or the App management will be affected
-     * If the thing you want to do takes time, try create a taak or lvgl timer to handle them.
-     * Try use millis() instead of delay() here
-     * 
-     */
     void App_Noiser_onLoop()
     {
-        // Noiser_Loop();
     }
 
-
-    /**
-     * @brief Called when App is about to be destroy
-     * Please remember to release the resourse like lvgl timers in this function
-     * 
-     */
     void App_Noiser_onDestroy()
     {
         UI_LOG("[%s] onDestroy\n", App_Noiser_appName().c_str());
         Noiser_deinit();
     }
 
-
-    /**
-     * @brief Launcher will pass the BSP pointer through this function before onCreate
-     * 
-     */
     void App_Noiser_getBsp(void* bsp)
     {
         device = (CHAPPIE*)bsp;

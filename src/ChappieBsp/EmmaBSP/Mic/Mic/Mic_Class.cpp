@@ -161,6 +161,7 @@ ESP_LOGV("Mic","sampling rate:%d", sample_rate);
     return err;
   }
 
+
   void Mic_Class::mic_task(void* args)
   {
     auto self = (Mic_Class*)args;
@@ -237,7 +238,7 @@ ESP_LOGV("Mic","sampling rate:%d", sample_rate);
           } while (--os_remain && (src_idx < src_len));
         }
         if (os_remain) { continue; }
-        os_remain = oversampling;
+        os_remain = oversampling;            
 
         int32_t noise_filter = self->_cfg.noise_filter_level;
         if (noise_filter)
@@ -246,7 +247,7 @@ ESP_LOGV("Mic","sampling rate:%d", sample_rate);
           prev_value[flip] = value;
           flip = stereo - flip;
         }
-
+        
         value = value * f_gain;
 
         if (current_rec->is_16bit)
@@ -272,6 +273,8 @@ ESP_LOGV("Mic","sampling rate:%d", sample_rate);
           current_rec->length = 0;
           break;
         }
+        
+
       }
     }
     self->_is_recording = false;
@@ -280,7 +283,7 @@ ESP_LOGV("Mic","sampling rate:%d", sample_rate);
     self->_task_handle = nullptr;
     vTaskDelete(nullptr);
   }
-
+  
   bool Mic_Class::begin(void)
   {
     if (_task_running)
