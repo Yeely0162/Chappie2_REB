@@ -1,4 +1,5 @@
 #include "Seeed_BMP280.h"
+#include "../../src/ChappieBsp/Utility/ChappieI2C.hpp"
 
 bool BMP280::init(void)
 {
@@ -84,28 +85,49 @@ float BMP280::calcAltitude(float pressure)
 
 uint8_t BMP280::bmp280Read8(uint8_t reg)
 {
+  ChappieI2CGuard lock;
+
   Wire.beginTransmission(BMP280_ADDRESS);
   Wire.write(reg);
-  Wire.endTransmission();
-  Wire.requestFrom(BMP280_ADDRESS, 1);
-  while(!Wire.available());
+  if (Wire.endTransmission() != 0) {
+    printf("[BMP280] read 0x%02X write failed\n", (unsigned)reg);
+    return 0;
+  }
+  if (Wire.requestFrom(BMP280_ADDRESS, 1) != 1) {
+    printf("[BMP280] read 0x%02X request failed\n", (unsigned)reg);
+    return 0;
+  }
+  if (Wire.available() < 1) {
+    printf("[BMP280] read 0x%02X short read\n", (unsigned)reg);
+    return 0;
+  }
   return Wire.read();
 }
 
 uint16_t BMP280::bmp280Read16(uint8_t reg)
 {
-  uint8_t msb, lsb;
+  ChappieI2CGuard lock;
+  uint8_t msb = 0;
+  uint8_t lsb = 0;
 
   Wire.beginTransmission(BMP280_ADDRESS);
   Wire.write(reg);
-  Wire.endTransmission();
-
-  Wire.requestFrom(BMP280_ADDRESS, 2);
-  while(Wire.available()<2);
+  if (Wire.endTransmission() != 0) {
+    printf("[BMP280] read16 0x%02X write failed\n", (unsigned)reg);
+    return 0;
+  }
+  if (Wire.requestFrom(BMP280_ADDRESS, 2) != 2) {
+    printf("[BMP280] read16 0x%02X request failed\n", (unsigned)reg);
+    return 0;
+  }
+  if (Wire.available() < 2) {
+    printf("[BMP280] read16 0x%02X short read\n", (unsigned)reg);
+    return 0;
+  }
   msb = Wire.read();
   lsb = Wire.read();
 
-  return (uint16_t) msb<<8 | lsb;
+  return (uint16_t) msb << 8 | lsb;
 }
 
 uint16_t BMP280::bmp280Read16LE(uint8_t reg)
@@ -126,14 +148,23 @@ int16_t BMP280::bmp280ReadS16LE(uint8_t reg)
 
 uint32_t BMP280::bmp280Read24(uint8_t reg)
 {
-  uint32_t data;
+  ChappieI2CGuard lock;
+  uint32_t data = 0;
 
   Wire.beginTransmission(BMP280_ADDRESS);
   Wire.write(reg);
-  Wire.endTransmission();
-
-  Wire.requestFrom(BMP280_ADDRESS, 3);
-  while(Wire.available()<3);
+  if (Wire.endTransmission() != 0) {
+    printf("[BMP280] read24 0x%02X write failed\n", (unsigned)reg);
+    return 0;
+  }
+  if (Wire.requestFrom(BMP280_ADDRESS, 3) != 3) {
+    printf("[BMP280] read24 0x%02X request failed\n", (unsigned)reg);
+    return 0;
+  }
+  if (Wire.available() < 3) {
+    printf("[BMP280] read24 0x%02X short read\n", (unsigned)reg);
+    return 0;
+  }
   data = Wire.read();
   data <<= 8;
   data |= Wire.read();
@@ -145,9 +176,13 @@ uint32_t BMP280::bmp280Read24(uint8_t reg)
 
 void BMP280::writeRegister(uint8_t reg, uint8_t val)
 {
-  Wire.beginTransmission(BMP280_ADDRESS); // start transmission to device
-  Wire.write(reg);       // send register address
-  Wire.write(val);         // send value to write
+  {
+    ChappieI2CGuard lock;
+    Wire.beginTransmission(BMP280_ADDRESS);
+    Wire.write(reg);
+    Wire.write(val);
+    if (Wire.endTransmission() != 0)
+      printf("[BMP280] write 0x%02X failed\n", (unsigned)reg);
+  }
   delay(10);
-  Wire.endTransmission();     // end transmission
 }

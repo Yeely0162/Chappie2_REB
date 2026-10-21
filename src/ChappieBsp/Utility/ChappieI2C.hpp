@@ -12,8 +12,10 @@
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 /* Created once in CHAPPIE::init() before the LVGL task and main loop start. */
+extern StaticSemaphore_t g_chappie_i2c_mutex_buffer;
 extern SemaphoreHandle_t g_chappie_i2c_mutex;
 
 /**
@@ -31,10 +33,16 @@ class ChappieI2CGuard {
     public:
         ChappieI2CGuard() : _locked(false)
         {
-            if (g_chappie_i2c_mutex != NULL) {
-                if (xSemaphoreTake(g_chappie_i2c_mutex, portMAX_DELAY) == pdTRUE)
-                    _locked = true;
+            if (g_chappie_i2c_mutex == NULL) {
+                static bool warned = false;
+                if (!warned) {
+                    printf("[I2C] lock not initialized\n");
+                    warned = true;
+                }
+                return;
             }
+            if (xSemaphoreTake(g_chappie_i2c_mutex, portMAX_DELAY) == pdTRUE)
+                _locked = true;
         }
 
         ~ChappieI2CGuard()

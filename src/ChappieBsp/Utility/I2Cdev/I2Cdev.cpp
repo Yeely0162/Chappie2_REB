@@ -286,12 +286,13 @@ int8_t I2Cdev::readBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8
                 Wire.beginTransmission(devAddr);
                 Wire.write(regAddr);
 				#ifdef ARDUINO_ARCH_ESP32
-					Wire.endTransmission(false);
+					if (Wire.endTransmission(false) != 0) { count = -1; break; }
 				#else
-					Wire.endTransmission();
+					if (Wire.endTransmission() != 0) { count = -1; break; }
 				#endif
 
-                Wire.requestFrom(devAddr, (uint8_t)min(length - k, BUFFER_LENGTH));
+                const uint8_t to_read = (uint8_t)min(length - k, BUFFER_LENGTH);
+                if (Wire.requestFrom(devAddr, to_read) != to_read) { count = -1; break; }
         
                 for (; Wire.available() && (timeout == 0 || millis() - t1 < timeout); count++) {
                     data[count] = Wire.read();
@@ -438,9 +439,10 @@ int8_t I2Cdev::readWords(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint1
             for (uint8_t k = 0; k < length * 2; k += min(length * 2, BUFFER_LENGTH)) {
                 Wire.beginTransmission(devAddr);
                 Wire.write(regAddr);
-                Wire.endTransmission();
-                
-                Wire.requestFrom(devAddr, (uint8_t)(length * 2)); // length=words, this wants bytes
+                if (Wire.endTransmission() != 0) { count = -1; break; }
+
+                const uint8_t to_read = (uint8_t)(length * 2);
+                if (Wire.requestFrom(devAddr, to_read) != to_read) { count = -1; break; } // length=words, this wants bytes
         
                 bool msb = true; // starts with MSB, then LSB
                 for (; Wire.available() && count < length && (timeout == 0 || millis() - t1 < timeout);) {

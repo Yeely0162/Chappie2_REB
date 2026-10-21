@@ -20,14 +20,17 @@ class ChappieIMU : public MPU6050 {
         uint8_t _fifoBuffer[64];
         Quaternion _q;
         VectorFloat _gravity;
-        float _ypr[3]; 
+        float _ypr[3];
+        bool _ready = false;
 
     public:
         ChappieIMU() {}
         ~ChappieIMU() {}
 
         inline void init()
-        {   
+        {
+            if (_ready)
+                return;
 
             // initialize device
             initialize();
@@ -52,10 +55,13 @@ class ChappieIMU : public MPU6050 {
                 PrintActiveOffsets();
                 // turn on the DMP, now that it's ready
                 setDMPEnabled(true);
+                _ready = true;
             } else {
                 printf("[IMU] DMP init failed\n");
             }
         }
+
+        inline bool isReady() const { return _ready; }
 
         /**
          * @brief Get the Euler angles in degrees
@@ -63,10 +69,13 @@ class ChappieIMU : public MPU6050 {
          * @param yaw 
          * @param pitch 
          * @param roll 
-         * @return uint8_t 0) when no valid data is available
+         * @return uint8_t 0 when the read path ran, 1 when the IMU is not ready
          */
         inline uint8_t getYawPitchRoll(float& yaw, float& pitch, float& roll)
         {
+            if (!_ready)
+                return 1;
+
             // read a packet from FIFO
             if (dmpGetCurrentFIFOPacket(_fifoBuffer)) {
                 dmpGetQuaternion(&_q, _fifoBuffer);

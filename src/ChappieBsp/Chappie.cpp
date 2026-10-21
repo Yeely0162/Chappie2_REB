@@ -14,6 +14,7 @@
 #define DEBUG_CPU 1
 #include "esp32s3/rom/rtc.h"
 
+StaticSemaphore_t g_chappie_i2c_mutex_buffer;
 SemaphoreHandle_t g_chappie_i2c_mutex = NULL;
 
 void print_reset_reason(int reason)
@@ -61,6 +62,7 @@ void verbose_print_reset_reason(int reason)
   }
 }
 void I2C_Scan() {
+  ChappieI2CGuard lock;
   printf("Scanning...\n");
   for (byte addr = 1; addr < 127; addr++) {
     Wire.beginTransmission(addr);
@@ -71,11 +73,15 @@ void I2C_Scan() {
 }
 void CHAPPIE::init()
 {
-    /* One mutex for every multi-step I2C transaction on the shared bus */
+    /* One mutex for every multi-step I2C transaction on the shared bus.
+     * Static allocation cannot fail at runtime. */
     if (g_chappie_i2c_mutex == NULL) {
-        g_chappie_i2c_mutex = xSemaphoreCreateMutex();
-        if (g_chappie_i2c_mutex == NULL)
+        g_chappie_i2c_mutex = xSemaphoreCreateMutexStatic(&g_chappie_i2c_mutex_buffer);
+        if (g_chappie_i2c_mutex == NULL) {
             printf("[I2C] mutex create failed\n");
+            while (1)
+                delay(1000);
+        }
     }
 
     /* Init I2C */
@@ -112,7 +118,7 @@ void CHAPPIE::init()
     /* Init touchpad */
     Lcd.printf("%s", Cowsay("Pls touch screen to wakeup Tp").c_str());
     I2C_Scan();
-    Lcd.printf("Tp init success!\n");
+    Lcd.printf(Tp.isReady() ? "Tp init success!\n" : "Tp init failed\n");
     Wf.Init();
     Ble.Init();
     /* Init RTC */

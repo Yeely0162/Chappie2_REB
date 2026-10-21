@@ -16,6 +16,7 @@
 /* Configs */
 #define CTP_DEV_ADDR            0x15
 #define CTP_INT_PIN             21
+#define CTP_INIT_TIMEOUT_MS     600
 
 #define CTP_HORIZON
 // #define CTP_PORTRAIT
@@ -45,6 +46,8 @@ class ChappieCTP {
         /* Touch IRQ state */
         volatile bool _irq_flag = false;
         bool _was_touched = false;
+        uint32_t _last_touch_ms = 0;
+        uint32_t _wake_start_ms = 0;
 
         /* I2C related */
         TwoWire* _wire = NULL;
@@ -81,11 +84,12 @@ class ChappieCTP {
                 printf("[CTP] write 0x%02X failed\n", (unsigned)addr);
         }
 
-        inline void _log_read_error(uint8_t addr)
+        inline void _log_read_error(uint8_t addr, const char* phase)
         {
             static uint32_t last_log_ms = 0;
             if ((millis() - last_log_ms) >= 1000) {
-                printf("[CTP] i2c read failed @0x%02X\n", (unsigned)addr);
+                printf("[CTP] reg 0x%02X %s failed task=%s\n",
+                       (unsigned)addr, phase, pcTaskGetName(NULL));
                 last_log_ms = millis();
             }
         }
@@ -93,34 +97,52 @@ class ChappieCTP {
         inline bool _I2C_readBuff(uint8_t addr, int size, uint8_t buff[])
         {
             ChappieI2CGuard lock;
+            const char* phase = "transaction";
+
+            for (int i = 0; i < size; i++)
+                buff[i] = 0;
 
             for (int attempt = 0; attempt < 3; attempt++) {
+                phase = "write";
                 _wire->beginTransmission(_dev_addr);
                 _wire->write(addr);
-                if (_wire->endTransmission() == 0 &&
-                    _wire->requestFrom(_dev_addr, (size_t)size, true) == (size_t)size) {
-                    bool ok = true;
-                    for (int i = 0; i < size; i++) {
-                        int data = _wire->read();
-                        if (data < 0) {
-                            ok = false;
-                            break;
-                        }
-                        buff[i] = (uint8_t)data;
+                if (_wire->endTransmission() != 0) {
+                    if (attempt < 2) {
+                        delay(10);
+                        continue;
                     }
-                    if (ok)
-                        return true;
+                    break;
                 }
 
-                /* The first access after the controller wakes can NACK.
-                 * Give it up to ~20 ms to finish waking. */
+                phase = "request";
+                if (_wire->requestFrom(_dev_addr, (size_t)size, true) != (size_t)size) {
+                    if (attempt < 2) {
+                        delay(10);
+                        continue;
+                    }
+                    break;
+                }
+
+                phase = "read";
+                bool ok = true;
+                for (int i = 0; i < size; i++) {
+                    int data = _wire->read();
+                    if (data < 0) {
+                        ok = false;
+                        break;
+                    }
+                    buff[i] = (uint8_t)data;
+                }
+                if (ok)
+                    return true;
+
                 if (attempt < 2)
                     delay(10);
                 else
                     break;
             }
 
-            _log_read_error(addr);
+            _log_read_error(addr, phase);
             return false;
         }
 
@@ -144,6 +166,8 @@ class ChappieCTP {
             _enable = true;
             _irq_flag = false;
             _was_touched = false;
+            _last_touch_ms = 0;
+            _wake_start_ms = 0;
 
             /* Setup INT PIN: the controller asserts it on touch */
             pinMode(CTP_INT_PIN, INPUT_PULLUP);
@@ -209,10 +233,15 @@ class ChappieCTP {
         inline void init(TwoWire* wire)
         {
             _I2C_init(wire, CTP_DEV_ADDR);
-            /* Hold until init done */
+            const uint32_t start = millis();
             while (_I2C_checkDevAvl()) {
-                printf("[CTP] please touch screen to activate it\n");
-                delay(500);
+                if ((millis() - start) >= CTP_INIT_TIMEOUT_MS) {
+                    printf("[CTP] no response after %lums\n",
+                           (unsigned long)(millis() - start));
+                    _enable = false;
+                    return;
+                }
+                delay(50);
             }
             printf("[CTP] init successful\n");
             _init();
@@ -229,11 +258,19 @@ class ChappieCTP {
             if ((!_irq_flag) && (!_was_touched) && (digitalRead(CTP_INT_PIN) != LOW))
                 return false;
 
-            /* A new touch after auto sleep needs a short wake time. Waiting
-             * here avoids the first I2C access racing the controller wake. */
-            if (!_was_touched)
-                delay(30);
+            /* A touch after a long idle needs a short wake window. The
+             * previous log shows the next 30 ms poll succeeds, so defer the
+             * first access without blocking the LVGL task. */
+            if ((!_was_touched) && ((millis() - _last_touch_ms) > 2000)) {
+                if (_wake_start_ms == 0) {
+                    _wake_start_ms = millis();
+                    return false;
+                }
+                if ((millis() - _wake_start_ms) < 30)
+                    return false;
+            }
 
+            _wake_start_ms = 0;
             _irq_flag = false;
 
             uint8_t finger_num = 0;
@@ -243,6 +280,8 @@ class ChappieCTP {
             }
 
             _was_touched = ((finger_num & 0x03) != 0);
+            if (_was_touched)
+                _last_touch_ms = millis();
             return _was_touched;
         }
 
@@ -305,6 +344,8 @@ class ChappieCTP {
                 printf("X:%03d Y:%03d\n", _x_pos, _y_pos);
             }
         }
+
+        inline bool isReady() const { return _enable; }
 
         inline void enable() { _enable = true; }
         inline void disable() { _enable = false; }
