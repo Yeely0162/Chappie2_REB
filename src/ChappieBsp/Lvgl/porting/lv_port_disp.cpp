@@ -110,7 +110,7 @@ void lv_port_disp_init(LGFX_EmmaDisplay* lcd)
         while (1)
             delay(1000);
     } else {
-        printf("[LVGL] malloc buffer from PSRAM successful\n");
+        printf("\n[LVGL] malloc buffer from PSRAM successful\n");
         printf("[LVGL] free PSRAM: %d\r\n", ESP.getFreePsram());
     }
 

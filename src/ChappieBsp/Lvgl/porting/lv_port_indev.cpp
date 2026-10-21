@@ -56,8 +56,6 @@ lv_indev_t * indev_touchpad;
 // lv_indev_t * indev_encoder;
 // lv_indev_t * indev_button;
 static ChappieCTP* _tp;
-static int x_pos = 0;
-static int y_pos = 0;
 
 static int32_t encoder_diff;
 static lv_indev_state_t encoder_state;
@@ -205,8 +203,10 @@ static void touchpad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
     // }
 
 
-    if(_tp->isTouched()) {
-        _tp->getPos(x_pos, y_pos);
+    int x_pos = 0;
+    int y_pos = 0;
+
+    if ((_tp != NULL) && _tp->isTouched() && _tp->getPos(x_pos, y_pos)) {
         // printf("X:%d Y:%d\n", x_pos, y_pos);
         data->point.x = x_pos;
         data->point.y = y_pos;

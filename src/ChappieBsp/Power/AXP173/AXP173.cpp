@@ -1,4 +1,5 @@
 #include "AXP173.h"
+#include "../../Utility/ChappieI2C.hpp"
 
 
 /* Private functions */
@@ -25,7 +26,7 @@ uint16_t AXP173::_getMid(uint16_t input, uint16_t min, uint16_t max) {
  * @return false Init successful
  */
 bool AXP173::begin() {
-    Wire.begin();
+    /* CHAPPIE::init() owns the I2C bus; do not call Wire.begin() again. */
     // Wire.beginTransmission(0x34);
     // return Wire.endTransmission() ? true : false;
     return true;
@@ -256,18 +257,30 @@ float AXP173::getTSTemp() {
     return OFFSET_DEG_C + ReData * ADCLSB;
 }
 void AXP173::write1Byte(uint8_t addr, uint8_t data) {
+    ChappieI2CGuard lock;
+
     Wire.beginTransmission(0x34);
     Wire.write(addr);
     Wire.write(data);
-    Wire.endTransmission();
+    if (Wire.endTransmission() != 0)
+        printf("[AXP] write 0x%02X failed\n", (unsigned)addr);
 }
 
 uint8_t AXP173::read8Bit(uint8_t addr) {
+    ChappieI2CGuard lock;
+
     Wire.beginTransmission(0x34);
     Wire.write(addr);
-    Wire.endTransmission();
-    Wire.requestFrom(0x34, (size_t)1);
-    return Wire.read();
+    if (Wire.endTransmission() != 0) {
+        printf("[AXP] read 0x%02X failed: write\n", (unsigned)addr);
+        return 0;
+    }
+    if (Wire.requestFrom(0x34, (size_t)1) != (size_t)1) {
+        printf("[AXP] read 0x%02X failed: read\n", (unsigned)addr);
+        return 0;
+    }
+    int data = Wire.read();
+    return (data < 0) ? 0 : (uint8_t)data;
 }
 
 uint16_t AXP173::read12Bit(uint8_t addr) {
@@ -301,12 +314,26 @@ uint32_t AXP173::read32Bit(uint8_t addr) {
 }
 
 void AXP173::readBuff(uint8_t addr, int size, uint8_t buff[]) {
+    ChappieI2CGuard lock;
+
+    for (int i = 0; i < size; i++)
+        buff[i] = 0;
+
     Wire.beginTransmission(0x34);
     Wire.write(addr);
-    Wire.endTransmission();
-    Wire.requestFrom(0x34, (size_t)size);
+    if (Wire.endTransmission() != 0) {
+        printf("[AXP] read 0x%02X failed: write\n", (unsigned)addr);
+        return;
+    }
+    if (Wire.requestFrom(0x34, (size_t)size) != (size_t)size) {
+        printf("[AXP] read 0x%02X failed: read\n", (unsigned)addr);
+        return;
+    }
     for (int i = 0; i < size; i++) {
-        buff[i] = Wire.read();
+        int data = Wire.read();
+        if (data < 0)
+            break;
+        buff[i] = (uint8_t)data;
     }
 }
 
@@ -317,9 +344,12 @@ uint16_t AXP173::read16Bit_lowFirst(uint8_t addr) {
 }
 
 void AXP173::write16Bit(uint8_t addr, uint8_t data_1, uint8_t data_2) {
+    ChappieI2CGuard lock;
+
     Wire.beginTransmission(0x34);
     Wire.write(addr);
     Wire.write(data_1);
     Wire.write(data_2);
-    Wire.endTransmission();
+    if (Wire.endTransmission() != 0)
+        printf("[AXP] write 0x%02X failed\n", (unsigned)addr);
 }

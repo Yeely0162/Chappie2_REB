@@ -2,8 +2,7 @@
 
 bool BMP280::init(void)
 {
-    
-  Wire.begin();
+  /* CHAPPIE::init() owns the I2C bus; do not call Wire.begin() again. */
   // Wire.setClock(3400);
   Serial.println(Wire.getClock());
   if(bmp280Read8(BMP280_REG_CHIPID) != 0x58)

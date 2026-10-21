@@ -11,6 +11,7 @@
 #pragma once
 #include "Arduino.h"
 #include "Wire.h"
+#include "../Utility/ChappieI2C.hpp"
 
 /* Configs */
 #define CTP_DEV_ADDR            0x15
@@ -37,13 +38,23 @@
 
 class ChappieCTP {
     private:
-        int _x_pos;
-        int _y_pos;
-        bool _enable;
+        int _x_pos = -1;
+        int _y_pos = -1;
+        bool _enable = false;
+
+        /* Touch IRQ state */
+        volatile bool _irq_flag = false;
+        bool _was_touched = false;
 
         /* I2C related */
-        TwoWire* _wire;
-        uint8_t _dev_addr;
+        TwoWire* _wire = NULL;
+        uint8_t _dev_addr = CTP_DEV_ADDR;
+
+        static void IRAM_ATTR _touch_isr(void* arg)
+        {
+            ChappieCTP* self = (ChappieCTP*)arg;
+            self->_irq_flag = true;
+        }
 
         inline void _I2C_init(TwoWire * wire, uint8_t dev_addr)
         {
@@ -53,36 +64,69 @@ class ChappieCTP {
 
         inline bool _I2C_checkDevAvl()
         {
+            ChappieI2CGuard lock;
+
             _wire->beginTransmission(_dev_addr);
             return ( _wire->endTransmission() ? true : false);
         }
 
         inline void _I2C_write1Byte(uint8_t addr, uint8_t data)
         {
+            ChappieI2CGuard lock;
+
             _wire->beginTransmission(_dev_addr);
             _wire->write(addr);
             _wire->write(data);
-            _wire->endTransmission();
+            if (_wire->endTransmission() != 0)
+                printf("[CTP] write 0x%02X failed\n", (unsigned)addr);
         }
 
-        inline void _I2C_readBuff(uint8_t addr, int size, uint8_t buff[])
+        inline void _log_read_error(uint8_t addr)
         {
-            _wire->beginTransmission(_dev_addr);
-            _wire->write(addr);
-            _wire->endTransmission();
-            _wire->requestFrom(_dev_addr, (size_t)size);
-            for (int i = 0; i < size; i++) {
-                buff[i] = _wire->read();
+            static uint32_t last_log_ms = 0;
+            if ((millis() - last_log_ms) >= 1000) {
+                printf("[CTP] i2c read failed @0x%02X\n", (unsigned)addr);
+                last_log_ms = millis();
             }
         }
 
-        inline uint8_t _I2C_read8Bit(uint8_t addr)
+        inline bool _I2C_readBuff(uint8_t addr, int size, uint8_t buff[])
         {
-            _wire->beginTransmission(_dev_addr);
-            _wire->write(addr);
-            _wire->endTransmission();
-            _wire->requestFrom(_dev_addr, (size_t)1);
-            return _wire->read();
+            ChappieI2CGuard lock;
+
+            for (int attempt = 0; attempt < 3; attempt++) {
+                _wire->beginTransmission(_dev_addr);
+                _wire->write(addr);
+                if (_wire->endTransmission() == 0 &&
+                    _wire->requestFrom(_dev_addr, (size_t)size, true) == (size_t)size) {
+                    bool ok = true;
+                    for (int i = 0; i < size; i++) {
+                        int data = _wire->read();
+                        if (data < 0) {
+                            ok = false;
+                            break;
+                        }
+                        buff[i] = (uint8_t)data;
+                    }
+                    if (ok)
+                        return true;
+                }
+
+                /* The first access after the controller wakes can NACK.
+                 * Give it up to ~20 ms to finish waking. */
+                if (attempt < 2)
+                    delay(10);
+                else
+                    break;
+            }
+
+            _log_read_error(addr);
+            return false;
+        }
+
+        inline bool _I2C_read8Bit(uint8_t addr, uint8_t& data)
+        {
+            return _I2C_readBuff(addr, 1, &data);
         }
 
         inline uint16_t _I2C_read12Bit(uint8_t addr)
@@ -98,17 +142,20 @@ class ChappieCTP {
             /* Reset coordinate */
             _reset_coor();
             _enable = true;
+            _irq_flag = false;
+            _was_touched = false;
 
-            /* Shut down auto sleep */
+            /* Setup INT PIN: the controller asserts it on touch */
+            pinMode(CTP_INT_PIN, INPUT_PULLUP);
+            attachInterruptArg(digitalPinToInterrupt(CTP_INT_PIN), _touch_isr, this, FALLING);
+            _I2C_write1Byte(0xFA, 0x70);
+            // _I2C_write1Byte(0xED, 0xC8);
+
+            /* Keep the original auto sleep setting. A touch wakes the
+             * controller and the IRQ state machine handles the read. */
             // _I2C_write1Byte(0xFE, 0xFF);
             _I2C_write1Byte(0xFE, 0x07);
             printf("[CTP] auto sleep shut down\n");
-
-            /* Setup INT PIN */
-            // pinMode(CTP_INT_PIN, INPUT);
-            // printf("[CTP] set int-pin input\n");
-            // _I2C_write1Byte(0xFA, 0B01000001);
-            // _I2C_write1Byte(0xED, 0xC8);
         }
 
         inline void _reset_coor()
@@ -117,13 +164,14 @@ class ChappieCTP {
             _y_pos = -1;
         }
 
-        inline void _update_coor()
+        inline bool _update_coor()
         {
             // coor_x = _I2C_read12Bit(0x03);
             // coor_y = _I2C_read12Bit(0x05);
 
             uint8_t buff[4];
-            _I2C_readBuff(0x03, 4, buff);
+            if (!_I2C_readBuff(0x03, 4, buff))
+                return false;
             // _x_pos = ((buff[0]&0x0F)<<8)|buff[1];
             // _y_pos = ((buff[2]&0x0F)<<8)|buff[3];
 
@@ -140,6 +188,15 @@ class ChappieCTP {
                 _x_pos = ((buff[0]&0x0F)<<8)|buff[1];
                 _y_pos = ((buff[2]&0x0F)<<8)|buff[3];
             #endif
+
+            /* A failed read used to look like 0x0FFF, do not pass it to LVGL */
+            if ((_x_pos > 1000) || (_x_pos < -1000) ||
+                (_y_pos > 1000) || (_y_pos < -1000)) {
+                _reset_coor();
+                return false;
+            }
+
+            return true;
         }
 
 
@@ -163,17 +220,45 @@ class ChappieCTP {
 
         inline bool isTouched()
         {
-            // return !digitalRead(CTP_INT_PIN);
-
             if (!_enable)
                 return false;
 
-            return _I2C_read8Bit(0x02) ? true : false;
+            /* Read only when the controller has signalled a touch, a finger
+             * is still held, or INT is explicitly asserted. This keeps the
+             * controller in auto sleep without polling it while idle. */
+            if ((!_irq_flag) && (!_was_touched) && (digitalRead(CTP_INT_PIN) != LOW))
+                return false;
+
+            /* A new touch after auto sleep needs a short wake time. Waiting
+             * here avoids the first I2C access racing the controller wake. */
+            if (!_was_touched)
+                delay(30);
+
+            _irq_flag = false;
+
+            uint8_t finger_num = 0;
+            if (!_I2C_read8Bit(0x02, finger_num)) {
+                _irq_flag = true;
+                return false;
+            }
+
+            _was_touched = ((finger_num & 0x03) != 0);
+            return _was_touched;
         }
 
-        inline void getPos(int& x_pos, int& y_pos)
+        inline bool getPos(int& x_pos, int& y_pos)
         {
-            _update_coor();
+            if (!_enable) {
+                x_pos = -1;
+                y_pos = -1;
+                return false;
+            }
+
+            if (!_update_coor()) {
+                x_pos = -1;
+                y_pos = -1;
+                return false;
+            }
 
             x_pos = _x_pos;
             y_pos = _y_pos;
@@ -207,17 +292,18 @@ class ChappieCTP {
                 #endif           
 
             #endif
+
+            return true;
         }
 
         inline void printCoordinate()
         {
-            if (isTouched())
-                _update_coor();
-            else
+            if (isTouched() && _update_coor())
+                printf("X:%03d Y:%03d\n", _x_pos, _y_pos);
+            else {
                 _reset_coor();
-
-            // _update_coor();
-            printf("X:%03d Y:%03d\n", _x_pos, _y_pos);
+                printf("X:%03d Y:%03d\n", _x_pos, _y_pos);
+            }
         }
 
         inline void enable() { _enable = true; }

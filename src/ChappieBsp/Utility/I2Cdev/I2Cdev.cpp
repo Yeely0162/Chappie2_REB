@@ -45,6 +45,7 @@ THE SOFTWARE.
 */
 
 #include "I2Cdev.h"
+#include "../ChappieI2C.hpp"
 
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE || I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_SBWIRE
 
@@ -220,6 +221,8 @@ int8_t I2Cdev::readBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8
         Serial.print("...");
     #endif
 
+    ChappieI2CGuard lock;
+
     int8_t count = 0;
     uint32_t t1 = millis();
 
@@ -322,6 +325,15 @@ int8_t I2Cdev::readBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8
         Serial.println(" read).");
     #endif
 
+    if (count < length) {
+        static uint32_t last_log_ms = 0;
+        if ((millis() - last_log_ms) >= 1000) {
+            printf("[I2Cdev] read 0x%02X reg 0x%02X len %u failed\n",
+                   (unsigned)devAddr, (unsigned)regAddr, (unsigned)length);
+            last_log_ms = millis();
+        }
+    }
+
     return count;
 }
 
@@ -343,6 +355,8 @@ int8_t I2Cdev::readWords(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint1
         Serial.print(regAddr, HEX);
         Serial.print("...");
     #endif
+
+    ChappieI2CGuard lock;
 
     int8_t count = 0;
     uint32_t t1 = millis();
@@ -473,7 +487,16 @@ int8_t I2Cdev::readWords(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint1
         Serial.print(count, DEC);
         Serial.println(" read).");
     #endif
-    
+
+    if (count < length) {
+        static uint32_t last_log_ms = 0;
+        if ((millis() - last_log_ms) >= 1000) {
+            printf("[I2Cdev] read 0x%02X reg 0x%02X len %u failed\n",
+                   (unsigned)devAddr, (unsigned)regAddr, (unsigned)length);
+            last_log_ms = millis();
+        }
+    }
+
     return count;
 }
 
@@ -600,6 +623,9 @@ bool I2Cdev::writeBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_
         Serial.print(regAddr, HEX);
         Serial.print("...");
     #endif
+
+    ChappieI2CGuard lock;
+
     uint8_t status = 0;
     #if ((I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE && ARDUINO < 100) || I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_NBWIRE)
         Wire.beginTransmission(devAddr);
@@ -641,6 +667,12 @@ bool I2Cdev::writeBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_
     #ifdef I2CDEV_SERIAL_DEBUG
         Serial.println(". Done.");
     #endif
+
+    if (status != 0) {
+        printf("[I2Cdev] write 0x%02X reg 0x%02X len %u failed\n",
+               (unsigned)devAddr, (unsigned)regAddr, (unsigned)length);
+    }
+
     return status == 0;
 }
 
@@ -661,6 +693,9 @@ bool I2Cdev::writeWords(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint16
         Serial.print(regAddr, HEX);
         Serial.print("...");
     #endif
+
+    ChappieI2CGuard lock;
+
     uint8_t status = 0;
     #if ((I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE && ARDUINO < 100) || I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_NBWIRE)
         Wire.beginTransmission(devAddr);
@@ -706,6 +741,12 @@ bool I2Cdev::writeWords(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint16
     #ifdef I2CDEV_SERIAL_DEBUG
         Serial.println(". Done.");
     #endif
+
+    if (status != 0) {
+        printf("[I2Cdev] write 0x%02X reg 0x%02X len %u failed\n",
+               (unsigned)devAddr, (unsigned)regAddr, (unsigned)length);
+    }
+
     return status == 0;
 }
 

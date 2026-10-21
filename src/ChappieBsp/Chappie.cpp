@@ -10,8 +10,12 @@
  */
 
 #include "Chappie.h"
+#include "Utility/ChappieI2C.hpp"
 #define DEBUG_CPU 1
 #include "esp32s3/rom/rtc.h"
+
+SemaphoreHandle_t g_chappie_i2c_mutex = NULL;
+
 void print_reset_reason(int reason)
 {
   switch ( reason)
@@ -56,8 +60,24 @@ void verbose_print_reset_reason(int reason)
     default : printf("\nNO_MEAN");
   }
 }
+void I2C_Scan() {
+  printf("Scanning...\n");
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      printf("Found: 0x%02X\n", addr);
+    }
+  }
+}
 void CHAPPIE::init()
 {
+    /* One mutex for every multi-step I2C transaction on the shared bus */
+    if (g_chappie_i2c_mutex == NULL) {
+        g_chappie_i2c_mutex = xSemaphoreCreateMutex();
+        if (g_chappie_i2c_mutex == NULL)
+            printf("[I2C] mutex create failed\n");
+    }
+
     /* Init I2C */
     Wire.begin(5, 4);
     Wire.setClock(400000);
@@ -82,7 +102,7 @@ void CHAPPIE::init()
     }
     // Lcd.printf("%s", Logo);
     // delay(50);
-    Lcd.printf("\n ChappieBSP %s :)\n Author: Forairaaaaa\n", EMMA_BSP_VERISON);
+    Lcd.printf("\n ChappieBSP %s :)\n Author: Yeely\n", EMMA_BSP_VERISON);
     // delay(50);
     Lcd.printf(" Project: %s\n", EMMA_PROJECT_NAME);
     // Lcd.printf(" IIC Num: %d\n", num);
@@ -91,7 +111,7 @@ void CHAPPIE::init()
 
     /* Init touchpad */
     Lcd.printf("%s", Cowsay("Pls touch screen to wakeup Tp").c_str());
-    
+    I2C_Scan();
     Lcd.printf("Tp init success!\n");
     Wf.Init();
     Ble.Init();

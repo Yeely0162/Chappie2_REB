@@ -12,6 +12,7 @@
 #include "EmmaBSP/Emma.h"
 #include "CTP/ChappieCTP.hpp"
 #include "IMU/ChappieIMU.hpp"
+#include "MAG/ChappieMAG.hpp"
 #include "Power/ChappiePower.hpp"
 #include "SD/ChappieSD.hpp"
 #include "ENV/ChappieENV.hpp"
@@ -44,6 +45,8 @@ class CHAPPIE : public EMMA {
 
         ChappieIMU Imu;
 
+        ChappieMAG Mag;
+
         ChappieSD Sd;
 
         ChappiePower Pow;
@@ -57,6 +60,22 @@ class CHAPPIE : public EMMA {
         // Net --WiFi --Bluetooth
         ConfigWiFi Wf;
         ConfigBLE Ble;
+
+        /**
+         * @brief Init BMM150 on demand
+         *
+         * Only the App that needs the magnetometer should call this. The
+         * driver is not touched during boot, so an unused sensor produces no
+         * I2C traffic and no serial output.
+         *
+         * @return true when the sensor answered and was configured
+         */
+        inline bool initMag()
+        {
+            if (Mag.isReady())
+                return true;
+            return Mag.init(&Wire);
+        }
 
         void init();
     

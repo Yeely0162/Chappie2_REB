@@ -1,4 +1,5 @@
 #include "I2C_BM8563.h"
+#include "../ChappieI2C.hpp"
 
 I2C_BM8563::I2C_BM8563(uint8_t deviceAddress, TwoWire &i2cPort) {
   _deviceAddress = deviceAddress;
@@ -6,11 +7,14 @@ I2C_BM8563::I2C_BM8563(uint8_t deviceAddress, TwoWire &i2cPort) {
 }
 
 void I2C_BM8563::begin(void) {
+  ChappieI2CGuard lock;
+
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(0x00);
   _i2cPort->write(0x00);
   _i2cPort->write(0x00);
-  _i2cPort->endTransmission();
+  if (_i2cPort->endTransmission() != 0)
+    printf("[RTC] begin write failed\n");
 }
 
 bool I2C_BM8563::getVoltLow() {
@@ -36,18 +40,26 @@ uint8_t I2C_BM8563::byteToBcd2(uint8_t value) {
 }
 
 void I2C_BM8563::getTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct) {
+  ChappieI2CGuard lock;
   uint8_t buf[3] = {0};
 
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(0x02);
-  _i2cPort->endTransmission(false);
-  _i2cPort->requestFrom(_deviceAddress, 3);
-
-  while (_i2cPort->available()) {
-    buf[0] = _i2cPort->read();
-    buf[1] = _i2cPort->read();
-    buf[2] = _i2cPort->read();
+  if (_i2cPort->endTransmission(false) != 0) {
+    printf("[RTC] getTime write failed\n");
+    return;
   }
+  if (_i2cPort->requestFrom(_deviceAddress, 3) != 3) {
+    printf("[RTC] getTime read failed\n");
+    return;
+  }
+  if (_i2cPort->available() < 3) {
+    printf("[RTC] getTime short read\n");
+    return;
+  }
+  buf[0] = _i2cPort->read();
+  buf[1] = _i2cPort->read();
+  buf[2] = _i2cPort->read();
 
   I2C_BM8563_TimeStruct->seconds = bcd2ToByte(buf[0] & 0x7f);
   I2C_BM8563_TimeStruct->minutes = bcd2ToByte(buf[1] & 0x7f);
@@ -59,28 +71,39 @@ void I2C_BM8563::setTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct) {
     return;
   }
 
+  ChappieI2CGuard lock;
+
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(0x02);
   _i2cPort->write(byteToBcd2(I2C_BM8563_TimeStruct->seconds));
   _i2cPort->write(byteToBcd2(I2C_BM8563_TimeStruct->minutes));
   _i2cPort->write(byteToBcd2(I2C_BM8563_TimeStruct->hours));
-  _i2cPort->endTransmission();
+  if (_i2cPort->endTransmission() != 0)
+    printf("[RTC] setTime failed\n");
 }
 
 void I2C_BM8563::getDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {
+  ChappieI2CGuard lock;
   uint8_t buf[4] = {0};
 
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(0x05);
-  _i2cPort->endTransmission(false);
-  _i2cPort->requestFrom(_deviceAddress, 4);
-
-  while (_i2cPort->available()) {
-    buf[0] = _i2cPort->read();
-    buf[1] = _i2cPort->read();
-    buf[2] = _i2cPort->read();
-    buf[3] = _i2cPort->read();
+  if (_i2cPort->endTransmission(false) != 0) {
+    printf("[RTC] getDate write failed\n");
+    return;
   }
+  if (_i2cPort->requestFrom(_deviceAddress, 4) != 4) {
+    printf("[RTC] getDate read failed\n");
+    return;
+  }
+  if (_i2cPort->available() < 4) {
+    printf("[RTC] getDate short read\n");
+    return;
+  }
+  buf[0] = _i2cPort->read();
+  buf[1] = _i2cPort->read();
+  buf[2] = _i2cPort->read();
+  buf[3] = _i2cPort->read();
 
   I2C_BM8563_DateStruct->date    = bcd2ToByte(buf[0] & 0x3f);
   I2C_BM8563_DateStruct->weekDay = bcd2ToByte(buf[1] & 0x07);
@@ -98,6 +121,8 @@ void I2C_BM8563::setDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {
     return;
   }
 
+  ChappieI2CGuard lock;
+
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(0x05);
   _i2cPort->write(byteToBcd2(I2C_BM8563_DateStruct->date));
@@ -111,22 +136,35 @@ void I2C_BM8563::setDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {
     _i2cPort->write(byteToBcd2((uint8_t)(I2C_BM8563_DateStruct->year % 100)));
   }
 
-  _i2cPort->endTransmission();
+  if (_i2cPort->endTransmission() != 0)
+    printf("[RTC] setDate failed\n");
 }
 
 void I2C_BM8563::WriteReg(uint8_t reg, uint8_t data) {
+  ChappieI2CGuard lock;
+
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(reg);
   _i2cPort->write(data);
-  _i2cPort->endTransmission();
+  if (_i2cPort->endTransmission() != 0)
+    printf("[RTC] write 0x%02X failed\n", (unsigned)reg);
 }
 
 uint8_t I2C_BM8563::ReadReg(uint8_t reg) {
+  ChappieI2CGuard lock;
+
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(reg);
-  _i2cPort->endTransmission(false);
-  _i2cPort->requestFrom(_deviceAddress, 1);
-  return _i2cPort->read();
+  if (_i2cPort->endTransmission(false) != 0) {
+    printf("[RTC] read 0x%02X failed: write\n", (unsigned)reg);
+    return 0;
+  }
+  if (_i2cPort->requestFrom(_deviceAddress, 1) != 1) {
+    printf("[RTC] read 0x%02X failed: read\n", (unsigned)reg);
+    return 0;
+  }
+  int data = _i2cPort->read();
+  return (data < 0) ? 0 : (uint8_t)data;
 }
 
 int I2C_BM8563::SetAlarmIRQ(int afterSeconds) {
