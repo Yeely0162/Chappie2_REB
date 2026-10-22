@@ -85,8 +85,10 @@ class BLE_SecCallbacks : public BLESecurityCallbacks {
 public:
     BLE_SecCallbacks(ConfigBLE* parent) : _parent(parent) {}
 
+    /* Just Works pairing: there is no passkey to request or confirm. Both
+     * callbacks only exist because BLESecurityCallbacks is abstract. */
     uint32_t onPassKeyRequest() override { return 0; }
-    bool onConfirmPIN(uint32_t) override { return false; }
+    bool onConfirmPIN(uint32_t) override { return true; }
     bool onSecurityRequest() override { return true; }
 
     void onPassKeyNotify(uint32_t pk) override {
@@ -247,7 +249,24 @@ void ConfigBLE::enable() {
     }
 
     BLEDevice::setMTU(517);
-    BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_MITM);
+    /*
+     * Pairing policy.
+     *
+     * The NUS link only carries local configuration traffic (time, Wi-Fi
+     * credentials, status) and has no keyboard or display of its own, so it
+     * cannot show a passkey and must not pretend to be an authenticated
+     * peripheral. The previous configuration (SC + MITM with IO capability
+     * DisplayOnly) made the stack generate a random 6-digit passkey that was
+     * never shown anywhere, so Android stopped at "enter PIN" and users typed
+     * 0000, which could never match.
+     *
+     * Secure Connections + bonding is kept: the link is encrypted and the
+     * bond survives reboots. MITM is dropped, which makes the stack use
+     * LE Secure Connections "Just Works" (IO capability None) - Android pairs
+     * without a PIN. This is not "security off": encryption and bonding stay
+     * enabled; only the unfulfillable passkey requirement is removed.
+     */
+    BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT_NO_MITM);
     BLEDevice::setSecurityCallbacks(new BLE_SecCallbacks(this));
 
     _server = BLEDevice::createServer();
@@ -280,8 +299,8 @@ void ConfigBLE::enable() {
 
     // Security
     BLESecurity* sec = new BLESecurity();
-    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
-    sec->setCapability(ESP_IO_CAP_OUT);
+    sec->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
+    sec->setCapability(ESP_IO_CAP_NONE);
     sec->setKeySize(16);
     sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
     sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);

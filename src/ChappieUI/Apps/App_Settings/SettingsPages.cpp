@@ -3,6 +3,7 @@
 #include "../../Resource/ResourcePool.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 #include <math.h>
@@ -27,17 +28,42 @@ static void back_cb(lv_event_t *e)
         g_back();
 }
 
-static const char *module_icon_for_title(const char *title)
+/* ========================================================================= */
+/* Module table                                                              */
+/* ========================================================================= */
+
+/*
+ * One entry per top-level module. The order is the order of the carousel and
+ * is the only place that decides a module's title and icon, so the sub-page
+ * header and the home carousel can never disagree about which icon belongs to
+ * which module.
+ */
+constexpr int MODULE_COUNT = 8;
+
+struct ModuleDef {
+    PageId page;
+    const char *title;
+    const char *icon;
+    const char *fields[3];
+};
+
+static const ModuleDef MODULES[MODULE_COUNT] = {
+    {Wifi,      "Wi-Fi",     "wifi_dark",      {"Status",     "Network", "Mode"}},
+    {Bluetooth, "Bluetooth", "bluetooth_dark", {"Status",     "Paired",  "Name"}},
+    {Time,      "Time",      "clock_dark",     {"Time",       "Date",    "NTP"}},
+    {Display,   "Display",   "monitor_dark",   {"Brightness", "Panel",   "Touch"}},
+    {Battery,   "Battery",   "battery_dark",   {"Level",      "Voltage", "State"}},
+    {Keys,      "Buttons",   "system_info",    {"A key",      "B key",   "Mapping"}},
+    {Test,      "Device",    "ok_dark",        {"Touch",      "Display", "Chip"}},
+    {About,     "About",     "about_dark",     {"Model",      "Firmware","Heap"}},
+};
+
+static int module_index_for(PageId page)
 {
-    if (strcmp(title, "Wi-Fi") == 0) return "wifi_dark";
-    if (strcmp(title, "Bluetooth") == 0) return "bluetooth_dark";
-    if (strcmp(title, "Time") == 0) return "clock_dark";
-    if (strcmp(title, "Display") == 0) return "monitor_dark";
-    if (strcmp(title, "Battery") == 0) return "battery_dark";
-    if (strcmp(title, "Buttons") == 0) return "system_info";
-    if (strcmp(title, "Device test") == 0) return "ok_dark";
-    if (strcmp(title, "About") == 0) return "about_dark";
-    return nullptr;
+    for (int i = 0; i < MODULE_COUNT; i++)
+        if (MODULES[i].page == page)
+            return i;
+    return -1;
 }
 
 /**
@@ -57,12 +83,41 @@ static const void *module_icon(const char *name)
 }
 
 /**
- * @brief Sub-page shell. The header carries the module icon and the same thin
- *        orange/teal bar as the home carousel, so every module keeps the same
- *        visual language instead of falling back to a generic list heading.
+ * @brief Draw a module icon into an lv_img with a consistent zoom.
+ *
+ * The resource pool mixes 35x35 and 36x36 sources and three colour formats
+ * (indexed, alpha mask, true colour + alpha). Recolouring to the theme text
+ * colour normalises them to one white line style, and sizing from the image
+ * descriptor keeps the drawn size identical instead of clipping the 36 px
+ * source into a 35 px box.
  */
-static lv_obj_t *shell(lv_obj_t *parent, const char *title)
+static void apply_icon(lv_obj_t *img, const char *name, uint16_t zoom)
 {
+    const lv_img_dsc_t *dsc = (const lv_img_dsc_t *)module_icon(name);
+    if (!img || !dsc)
+        return;
+    lv_img_set_src(img, dsc);
+    lv_img_set_zoom(img, zoom);
+    lv_obj_set_size(img,
+                    (lv_coord_t)((int32_t)dsc->header.w * zoom / 256),
+                    (lv_coord_t)((int32_t)dsc->header.h * zoom / 256));
+    lv_obj_set_style_img_recolor(img, ST_TEXT, 0);
+    lv_obj_set_style_img_recolor_opa(img, 255, 0);
+    lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
+}
+
+/**
+ * @brief Sub-page shell: back button, the module's own icon and its title.
+ *
+ * The dual-colour bar belongs to the home carousel only. Drawing a copy of it
+ * in this header made the Wi-Fi page look as if its module icon had been
+ * replaced by the position bar, so the bar is deliberately absent here.
+ */
+static lv_obj_t *shell(lv_obj_t *parent, PageId page)
+{
+    const int index = module_index_for(page);
+    const char *title = index >= 0 ? MODULES[index].title : "Settings";
+
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_set_size(root, SCREEN_W, SCREEN_H);
     lv_obj_set_pos(root, 0, 0);
@@ -81,13 +136,11 @@ static lv_obj_t *shell(lv_obj_t *parent, const char *title)
     lv_obj_set_style_border_width(hdr, 0, 0);
     lv_obj_set_style_radius(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
-    lv_obj_set_style_pad_column(hdr, 5, 0);
-    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *back = lv_btn_create(hdr);
-    lv_obj_set_size(back, 28, 28);
+    lv_obj_set_size(back, 26, 26);
+    lv_obj_set_pos(back, 5, 2);
     lv_obj_set_style_bg_opa(back, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(back, 0, 0);
     lv_obj_set_style_shadow_width(back, 0, 0);
@@ -99,42 +152,17 @@ static lv_obj_t *shell(lv_obj_t *parent, const char *title)
     lv_obj_set_style_text_font(backIcon, &lv_font_montserrat_18, 0);
     lv_obj_center(backIcon);
 
-    const char *iconName = module_icon_for_title(title);
-    if (iconName) {
+    if (index >= 0) {
         lv_obj_t *icon = lv_img_create(hdr);
-        lv_img_set_src(icon, module_icon(iconName));
-        lv_img_set_zoom(icon, 146);       /* 35 px -> 20 px */
-        lv_obj_set_style_img_recolor(icon, ST_TEXT, 0);
-        lv_obj_set_style_img_recolor_opa(icon, 255, 0);
-        lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
-
-        lv_obj_t *bar = lv_obj_create(hdr);
-        lv_obj_set_size(bar, 3, 18);
-        lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(bar, 0, 0);
-        lv_obj_set_style_pad_all(bar, 0, 0);
-        lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_t *top = lv_obj_create(bar);
-        lv_obj_set_pos(top, 0, 0);
-        lv_obj_set_size(top, 3, 9);
-        lv_obj_set_style_bg_color(top, ST_ORANGE, 0);
-        lv_obj_set_style_bg_opa(top, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(top, 0, 0);
-        lv_obj_set_style_radius(top, 1, 0);
-        lv_obj_t *bottom = lv_obj_create(bar);
-        lv_obj_set_pos(bottom, 0, 9);
-        lv_obj_set_size(bottom, 3, 9);
-        lv_obj_set_style_bg_color(bottom, ST_TEAL, 0);
-        lv_obj_set_style_bg_opa(bottom, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(bottom, 0, 0);
-        lv_obj_set_style_radius(bottom, 1, 0);
+        apply_icon(icon, MODULES[index].icon, 183);   /* 35 px -> 25 px */
+        lv_obj_set_pos(icon, 36, 3);
     }
 
     lv_obj_t *label = lv_label_create(hdr);
+    lv_obj_set_pos(label, 66, 5);
+    lv_obj_set_size(label, SCREEN_W - 66 - 8, 22);
     lv_label_set_text(label, title);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_set_flex_grow(label, 1);
     lv_obj_set_style_text_color(label, ST_TEXT, 0);
     lv_obj_set_style_text_font(label, fontTitle(), 0);
     lv_obj_set_style_text_letter_space(label, 1, 0);
@@ -293,267 +321,424 @@ static void open_confirm(const char *title, const char *message, const char *act
  */
 namespace {
 
-constexpr int MODULE_COUNT = 8;
+/*
+ * Carousel geometry. The selected module occupies one row; the previous and
+ * the next module are parked above and below it and slide in/out during a
+ * transition. The rail is a fixed sibling of the rows, never a child of them,
+ * so it can never be mistaken for (or reused as) a module icon.
+ */
+constexpr lv_coord_t CAR_VIEW_H  = 178;
+constexpr lv_coord_t CAR_ROW_H   = 158;
+constexpr lv_coord_t CAR_ROW_GAP = (CAR_VIEW_H - CAR_ROW_H) / 2;
+constexpr lv_coord_t CAR_ICON_X  = 14;
+constexpr uint16_t   CAR_ICON_ZOOM = 410;   /* 35 px source -> 56 px */
+constexpr lv_coord_t CAR_RAIL_X  = 96;
+constexpr lv_coord_t CAR_RAIL_Y  = 14;
+constexpr lv_coord_t CAR_RAIL_W  = 5;
+constexpr lv_coord_t CAR_RAIL_H  = 130;
+constexpr lv_coord_t CAR_INFO_X  = 108;
+constexpr lv_coord_t CAR_TITLE_W = 160;
+constexpr lv_coord_t CAR_FIELD_X = 176;
+constexpr lv_coord_t CAR_FIELD_W = 92;
+constexpr uint32_t   CAR_ANIM_MS = 220;
 
-struct ModuleDef {
-    const char *title;
-    const char *icon;
-    const char *labels[4];
+struct CarRow {
+    lv_obj_t *row;
+    lv_obj_t *icon;
+    lv_obj_t *title;
+    lv_obj_t *field[3];
+    lv_obj_t *value[3];
 };
 
-static const ModuleDef MODULES[MODULE_COUNT] = {
-    {"Wi-Fi",       "wifi_dark",      {"Status", "Network", "IP",     "Mode"}},
-    {"Bluetooth",   "bluetooth_dark", {"Status", "Name",    "Paired", "Connected"}},
-    {"Time",        "clock_dark",     {"Time",   "Date",    "RTC",    "NTP"}},
-    {"Display",     "monitor_dark",   {"Bright", "Panel",   "Driver", "Touch"}},
-    {"Battery",     "battery_dark",   {"Charge", "Voltage", "Current","State"}},
-    {"Buttons",     "system_info",    {"A key",  "B key",   "Long",   "Mapping"}},
-    {"Device test", "ok_dark",        {"Touch",  "Multi",   "Display","Colours"}},
-    {"About",       "about_dark",     {"Model",  "MCU",     "Firmware","LVGL"}},
-};
+static CarRow g_carRows[3];
+static int g_carSlotIndex[3] = {-1, -1, -1};
+static lv_obj_t *g_carView = nullptr;
+static lv_obj_t *g_carRailFill = nullptr;
+static lv_obj_t *g_carIndexLabel = nullptr;
+static lv_anim_t g_carAnim;
+static int g_carSel = 0;
+static int g_carFrom = 0;
+static int g_carDir = 0;
+/* Survives the root page being rebuilt, so returning from a sub-page restores
+ * the module the user was on. */
+static int g_carHomeIndex = 0;
+static int32_t g_carRailFrom = 0;   /* rail fill endpoints, 1/256 index units */
+static int32_t g_carRailTo = 0;
+static bool g_carAnimating = false;
+static uint32_t g_carLastInput = 0;
 
-lv_obj_t *g_modLayer = nullptr;
-lv_obj_t *g_modIcon = nullptr;
-lv_obj_t *g_modTitle = nullptr;
-lv_obj_t *g_modLabels[4] = {nullptr};
-lv_obj_t *g_modValues[4] = {nullptr};
-lv_obj_t *g_modCounter = nullptr;
-lv_obj_t *g_modDot[8] = {nullptr};
-int g_modIndex = 0;
-uint32_t g_lastGestureMs = 0;
+static void car_refresh_all();
 
-const lv_color_t COL_DOT_IDLE = lv_color_hex(0x2A3038);
-
-void anim_x_cb(void *obj, int32_t value)
+/** Wrap a carousel index around the module table. */
+static int car_wrap(int index)
 {
-    lv_obj_set_x((lv_obj_t *)obj, value);
+    while (index < 0)
+        index += MODULE_COUNT;
+    return index % MODULE_COUNT;
 }
 
-static void refresh_root();
-
-static void update_dots()
+static void car_set_position(int slot, lv_coord_t y, lv_opa_t opa)
 {
-    for (int i = 0; i < MODULE_COUNT; i++) {
-        if (!g_modDot[i]) continue;
-        lv_obj_set_style_bg_color(g_modDot[i], (i == g_modIndex) ? ST_TEXT : COL_DOT_IDLE, 0);
-        lv_obj_set_width(g_modDot[i], (i == g_modIndex) ? 12 : 6);
-    }
-}
-
-static void select_module(int index, int slideDir)
-{
-    if (!g_modLayer) return;
-    if (index < 0) index = MODULE_COUNT - 1;
-    if (index >= MODULE_COUNT) index = 0;
-    g_modIndex = index;
-
-    const ModuleDef &m = MODULES[index];
-    if (g_modIcon) {
-        lv_img_set_src(g_modIcon, module_icon(m.icon));
-    }
-    if (g_modTitle) {
-        lv_label_set_text(g_modTitle, m.title);
-    }
-    for (int i = 0; i < 4; i++) {
-        if (g_modLabels[i]) lv_label_set_text(g_modLabels[i], m.labels[i]);
-        if (g_modValues[i]) lv_label_set_text(g_modValues[i], "--");
-    }
-    if (g_modCounter) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%02d / %02d", g_modIndex + 1, MODULE_COUNT);
-        lv_label_set_text(g_modCounter, buf);
-    }
-    update_dots();
-    refresh_root();
-
-    if (slideDir != 0) {
-        lv_anim_t a;
-        lv_anim_init(&a);
-        lv_anim_set_var(&a, g_modLayer);
-        lv_anim_set_exec_cb(&a, anim_x_cb);
-        lv_anim_set_values(&a, (lv_coord_t)(8 + slideDir * 20), 8);
-        lv_anim_set_time(&a, 170);
-        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-        lv_anim_start(&a);
-    }
-}
-
-static void module_click_cb(lv_event_t *e)
-{
-    (void)e;
-    /* Do not open a page when the click is the tail of a swipe. */
-    if (millis() - g_lastGestureMs < 350)
+    if (!g_carRows[slot].row)
         return;
-    if (g_nav)
-        g_nav((uint8_t)(g_modIndex + 1));
+    lv_obj_set_y(g_carRows[slot].row, y);
+    lv_obj_set_style_opa(g_carRows[slot].row, opa, 0);
 }
 
-static void module_gesture_cb(lv_event_t *e)
+static void car_reset_positions()
+{
+    for (int slot = 0; slot < 3; slot++)
+        car_set_position(slot, CAR_ROW_GAP + (lv_coord_t)(slot - 1) * CAR_ROW_H, LV_OPA_COVER);
+}
+
+/**
+ * @brief Set the orange part of the rail.
+ *
+ * `progress` is the animation value (0..256). Every module owns one equal
+ * segment of the rail, so the orange fill grows by exactly one segment per
+ * downward step and retracts by one segment when going back. Wrapping from
+ * the last module to the first (and back) is interpolated across the end of
+ * the index range instead of jumping, so the bar never snaps.
+ */
+static void car_update_rail(int32_t progress)
+{
+    if (!g_carRailFill)
+        return;
+
+    int32_t units = g_carRailFrom + (g_carRailTo - g_carRailFrom) * progress / 256;
+    int32_t h = (CAR_RAIL_H * (units + 256)) / (MODULE_COUNT * 256);
+    if (h < 2)
+        h = 2;
+    if (h > CAR_RAIL_H)
+        h = CAR_RAIL_H;
+    lv_obj_set_height(g_carRailFill, (lv_coord_t)h);
+}
+
+static void car_apply_progress(int32_t p)
+{
+    if (p < 0)
+        p = 0;
+    if (p > 256)
+        p = 256;
+
+    const lv_coord_t dy = (lv_coord_t)(((int32_t)CAR_ROW_H * p) / 256);
+    const lv_opa_t out = (lv_opa_t)(255 - (255 * p) / 256);
+    const lv_opa_t in = (lv_opa_t)((255 * p) / 256);
+
+    if (g_carDir >= 0) {
+        /* Next module: the selected row leaves upwards, the row below it
+         * takes its place while fading in. */
+        car_set_position(1, CAR_ROW_GAP - dy, out);
+        car_set_position(2, CAR_ROW_GAP + CAR_ROW_H - dy, in);
+        car_set_position(0, CAR_ROW_GAP - CAR_ROW_H - dy, 0);
+    } else {
+        /* Previous module: the selected row leaves downwards. */
+        car_set_position(1, CAR_ROW_GAP + dy, out);
+        car_set_position(0, CAR_ROW_GAP - CAR_ROW_H + dy, in);
+        car_set_position(2, CAR_ROW_GAP + CAR_ROW_H + dy, 0);
+    }
+    car_update_rail(p);
+}
+
+static void car_anim_exec(void *var, int32_t value)
+{
+    (void)var;
+    car_apply_progress(value);
+}
+
+static void car_bind_slot(int slot, int index);
+static void car_update_index_label();
+
+static void car_anim_ready(lv_anim_t *a)
+{
+    (void)a;
+    g_carSel = car_wrap(g_carFrom + g_carDir);
+    g_carFrom = g_carSel;
+    g_carHomeIndex = g_carSel;
+    g_carRailFrom = g_carSel * 256;
+    g_carRailTo = g_carRailFrom;
+    g_carDir = 0;
+    g_carAnimating = false;
+
+    for (int slot = 0; slot < 3; slot++)
+        car_bind_slot(slot, g_carSel + slot - 1);
+    car_reset_positions();
+    car_update_rail(0);
+    car_update_index_label();
+    car_refresh_all();
+}
+
+/** Move the selection by one module. dir > 0 = next, dir < 0 = previous. */
+static void car_step(int dir)
+{
+    if (!g_carView || g_carAnimating)
+        return;
+
+    /* A single swipe must move exactly one step; the driver can report the
+     * same gesture on more than one object. */
+    uint32_t now = millis();
+    if (g_carLastInput && now - g_carLastInput < 140)
+        return;
+    g_carLastInput = now;
+
+    g_carDir = dir;
+    g_carFrom = g_carSel;
+
+    /* Rail endpoints. A normal step moves one segment; a wrap moves across
+     * the end of the scale so the orange fill keeps changing continuously. */
+    g_carRailFrom = g_carSel * 256;
+    if (dir > 0) {
+        if (g_carSel == MODULE_COUNT - 1) {
+            g_carRailFrom = MODULE_COUNT * 256;
+            g_carRailTo = 0;
+        } else {
+            g_carRailTo = (g_carSel + 1) * 256;
+        }
+    } else {
+        if (g_carSel == 0) {
+            g_carRailTo = MODULE_COUNT * 256;
+        } else {
+            g_carRailTo = (g_carSel - 1) * 256;
+        }
+    }
+
+    g_carAnimating = true;
+
+    lv_anim_del(g_carView, car_anim_exec);
+    lv_anim_init(&g_carAnim);
+    lv_anim_set_var(&g_carAnim, g_carView);
+    lv_anim_set_values(&g_carAnim, 0, 256);
+    lv_anim_set_time(&g_carAnim, CAR_ANIM_MS);
+    lv_anim_set_exec_cb(&g_carAnim, car_anim_exec);
+    lv_anim_set_path_cb(&g_carAnim, lv_anim_path_ease_in_out);
+    lv_anim_set_ready_cb(&g_carAnim, car_anim_ready);
+    lv_anim_start(&g_carAnim);
+}
+
+static void car_gesture_cb(lv_event_t *e)
 {
     lv_indev_t *indev = lv_indev_get_act();
-    if (!indev) return;
+    if (!indev)
+        return;
     lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-    if (dir == LV_DIR_LEFT) {
-        g_lastGestureMs = millis();
-        select_module(g_modIndex + 1, +1);
-    } else if (dir == LV_DIR_RIGHT) {
-        g_lastGestureMs = millis();
-        select_module(g_modIndex - 1, -1);
-    }
+    if (dir == LV_DIR_TOP)
+        car_step(1);
+    else if (dir == LV_DIR_BOTTOM)
+        car_step(-1);
 }
 
-static void mod_prev_cb(lv_event_t *e)
+static void car_row_click_cb(lv_event_t *e)
 {
-    (void)e;
-    g_lastGestureMs = millis();
-    select_module(g_modIndex - 1, -1);
+    /* While a transition runs the row still shows the previous module; do not
+     * open anything from that state. */
+    if (g_carAnimating)
+        return;
+
+    /* Ignore the click that LVGL synthesises at the end of a swipe; only an
+     * explicit tap opens a sub-page. */
+    if (g_carLastInput && millis() - g_carLastInput < 350)
+        return;
+
+    uintptr_t slot = (uintptr_t)lv_event_get_user_data(e);
+    if (slot > 2)
+        return;
+
+    int index = g_carSlotIndex[slot];
+    if (index < 0 || !g_nav)
+        return;
+    g_nav((uint8_t)MODULES[index].page);
 }
 
-static void mod_next_cb(lv_event_t *e)
+static void car_bind_slot(int slot, int index)
 {
-    (void)e;
-    g_lastGestureMs = millis();
-    select_module(g_modIndex + 1, +1);
+    index = car_wrap(index);
+    g_carSlotIndex[slot] = index;
+
+    CarRow &r = g_carRows[slot];
+    if (!r.row)
+        return;
+
+    const ModuleDef &m = MODULES[index];
+    apply_icon(r.icon, m.icon, CAR_ICON_ZOOM);
+    lv_obj_align(r.icon, LV_ALIGN_LEFT_MID, CAR_ICON_X, 0);
+    lv_label_set_text(r.title, m.title);
+    for (int i = 0; i < 3; i++)
+        lv_label_set_text(r.field[i], m.fields[i]);
 }
 
-static void refresh_root()
+static void car_update_index_label()
 {
-    if (!g_dev || !g_modValues[0]) return;
+    if (!g_carIndexLabel)
+        return;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d/%02d", g_carSel + 1, MODULE_COUNT);
+    lv_label_set_text(g_carIndexLabel, buf);
+}
 
-    switch ((PageId)(g_modIndex + 1)) {
+/**
+ * @brief Fill the three information lines of a module from the live system
+ *        state. Nothing here is a placeholder: every value is read from the
+ *        same service the sub-page uses.
+ */
+static void car_format_values(const ModuleDef &m, char out[3][48])
+{
+    for (int i = 0; i < 3; i++)
+        out[i][0] = '\0';
+    if (!g_dev)
+        return;
+
+    switch (m.page) {
     case Wifi: {
-        setText(g_modValues[0], g_dev->Wf.stateText());
-        String configured = g_dev->Wf.configuredSSID();
-        String network;
-        if (g_dev->Wf.isConnected())
-            network = g_dev->Wf.currentSSID();
-        else if (configured.length())
-            network = configured + " (saved)";
+        snprintf(out[0], 48, "%s", g_dev->Wf.stateText());
+        String cur = g_dev->Wf.currentSSID();
+        String cfg = g_dev->Wf.configuredSSID();
+        if (g_dev->Wf.isConnected() && cur.length())
+            snprintf(out[1], 48, "%s", cur.c_str());
+        else if (cfg.length())
+            snprintf(out[1], 48, "%s (saved)", cfg.c_str());
         else
-            network = "--";
-        setText(g_modValues[1], network.c_str());
-        setText(g_modValues[2], g_dev->Wf.LocalIP().c_str());
+            snprintf(out[1], 48, "--");
         const char *mode = "Off";
-        if (g_dev->Wf.isAPActive() && g_dev->Wf.isConnected()) mode = "AP + STA";
-        else if (g_dev->Wf.isAPActive()) mode = "AP";
-        else if (g_dev->Wf.isWiFiEnabled()) mode = "STA";
-        setText(g_modValues[3], mode);
+        if (g_dev->Wf.isAPActive() && (g_dev->Wf.isConnected() || g_dev->Wf.isBusy()))
+            mode = "AP + STA";
+        else if (g_dev->Wf.isAPActive())
+            mode = "AP";
+        else if (g_dev->Wf.isWiFiEnabled())
+            mode = "STA";
+        snprintf(out[2], 48, "%s", mode);
         break;
     }
-    case Bluetooth: {
-        setText(g_modValues[0], g_dev->Ble.stateText());
-        setText(g_modValues[1], g_dev->Ble.getDeviceName().c_str());
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%d", g_dev->Ble.getBondCount());
-        setText(g_modValues[2], buf);
-        String addr = g_dev->Ble.getConnectedAddress();
-        setText(g_modValues[3], addr.length() ? addr.c_str() : "--");
+    case Bluetooth:
+        snprintf(out[0], 48, "%s", g_dev->Ble.stateText());
+        snprintf(out[1], 48, "%d", g_dev->Ble.getBondCount());
+        snprintf(out[2], 48, "%s", g_dev->Ble.getDeviceName().c_str());
         break;
-    }
     case Time: {
         I2C_BM8563_TimeTypeDef t;
         I2C_BM8563_DateTypeDef d;
-        const bool timeOk = rtc_read_time(t);
-        const bool dateOk = rtc_read_date(d);
-        if (timeOk) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%02d:%02d:%02d", t.hours, t.minutes, t.seconds);
-            setText(g_modValues[0], buf);
-        } else {
-            setText(g_modValues[0], "--:--:--");
-        }
-        if (dateOk) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%04d-%02d-%02d", d.year, d.month, d.date);
-            setText(g_modValues[1], buf);
-        } else {
-            setText(g_modValues[1], timeOk ? "Not set" : "--");
-        }
-        setText(g_modValues[2], timeOk ? "OK" : "Read error");
-        setText(g_modValues[3], g_dev->Wf.ntpStateText());
+        if (rtc_read_time(t))
+            snprintf(out[0], 48, "%02d:%02d:%02d", t.hours, t.minutes, t.seconds);
+        else
+            snprintf(out[0], 48, "--:--:--");
+        if (rtc_read_date(d))
+            snprintf(out[1], 48, "%04d-%02d-%02d", d.year, d.month, d.date);
+        else
+            snprintf(out[1], 48, "%s", rtc_read_time(t) ? "Not set" : "--");
+        snprintf(out[2], 48, "%s", g_dev->Wf.ntpStateText());
         break;
     }
-    case Display: {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%u%%", (unsigned)((uint16_t)g_dev->Lcd.getBrightness() * 100 / 255));
-        setText(g_modValues[0], buf);
-        setText(g_modValues[1], "280 x 240");
-        setText(g_modValues[2], "ST7789V");
-        setText(g_modValues[3], g_dev->Tp.isReady() ? "CST816D OK" : "CST816D !");
+    case Display:
+        snprintf(out[0], 48, "%u%%",
+                 (unsigned)((uint16_t)g_dev->Lcd.getBrightness() * 100 / 255));
+        snprintf(out[1], 48, "280 x 240");
+        snprintf(out[2], 48, "%s", g_dev->Tp.isReady() ? "CST816D OK" : "Not detected");
         break;
-    }
-    case Battery: {
+    case Battery:
         if (!g_dev->Pow.dataValid()) {
-            setText(g_modValues[0], "--");
-            setText(g_modValues[1], "--");
-            setText(g_modValues[2], "--");
-            setText(g_modValues[3], "No data");
+            snprintf(out[0], 48, "--");
+            snprintf(out[1], 48, "--");
+            snprintf(out[2], 48, "No data");
         } else {
-            char buf[24];
-            snprintf(buf, sizeof(buf), "%u%%", (unsigned)g_dev->Pow.percent());
-            setText(g_modValues[0], buf);
-            snprintf(buf, sizeof(buf), "%.2f V", g_dev->Pow.voltageV());
-            setText(g_modValues[1], buf);
-            snprintf(buf, sizeof(buf), "%+.0f mA", g_dev->Pow.currentMA());
-            setText(g_modValues[2], buf);
-            setText(g_modValues[3], g_dev->Pow.chargeText());
+            snprintf(out[0], 48, "%u%%", (unsigned)g_dev->Pow.percent());
+            snprintf(out[1], 48, "%.2f V", g_dev->Pow.voltageV());
+            snprintf(out[2], 48, "%s", g_dev->Pow.chargeText());
         }
         break;
-    }
     case Keys:
-        setText(g_modValues[0], "Power dialog");
-        setText(g_modValues[1], "Back / home");
-        setText(g_modValues[2], "Not mapped");
-        setText(g_modValues[3], "A:9  B:0");
+        snprintf(out[0], 48, "Power dialog");
+        snprintf(out[1], 48, "Back / home");
+        snprintf(out[2], 48, "A:9  B:0");
         break;
     case Test:
-        setText(g_modValues[0], g_dev->Tp.isReady() ? "CST816D OK" : "Not detected");
-        setText(g_modValues[1], "Not supported");
-        setText(g_modValues[2], "ST7789V");
-        setText(g_modValues[3], "5 patterns");
+        snprintf(out[0], 48, "%s", g_dev->Tp.isReady() ? "CST816D OK" : "Not detected");
+        snprintf(out[1], 48, "ST7789V");
+        snprintf(out[2], 48, "ESP32-S3");
         break;
     case About:
-        setText(g_modValues[0], "Chappie 2");
-        setText(g_modValues[1], "ESP32-S3 N16R8");
-        setText(g_modValues[2], "V1.1");
-        setText(g_modValues[3], LVGL_VERSION_INFO);
+        snprintf(out[0], 48, "Chappie 2");
+        snprintf(out[1], 48, "V1.1");
+        snprintf(out[2], 48, "%lu KB free", (unsigned long)(ESP.getFreeHeap() / 1024));
         break;
     default:
         break;
     }
 }
 
-static lv_obj_t *make_module_field(lv_obj_t *parent, lv_obj_t **labelOut)
+static void car_refresh_all()
 {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_size(row, LV_PCT(100), 24);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    lv_obj_set_style_pad_all(row, 0, 0);
-    lv_obj_set_style_pad_column(row, 6, 0);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    if (!g_dev)
+        return;
 
-    lv_obj_t *label = lv_label_create(row);
-    lv_obj_set_width(label, 66);
-    lv_obj_set_style_text_color(label, ST_MUTED, 0);
-    lv_obj_set_style_text_font(label, fontSmall(), 0);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_label_set_text(label, "--");
-    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
-    *labelOut = label;
+    for (int slot = 0; slot < 3; slot++) {
+        const int index = g_carSlotIndex[slot];
+        if (index < 0 || !g_carRows[slot].value[0])
+            continue;
 
-    lv_obj_t *value = lv_label_create(row);
-    lv_obj_set_flex_grow(value, 1);
-    lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_color(value, ST_TEXT, 0);
-    lv_obj_set_style_text_font(value, fontValue(), 0);
-    lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
-    lv_label_set_text(value, "--");
-    lv_obj_clear_flag(value, LV_OBJ_FLAG_CLICKABLE);
-    return value;
+        char values[3][48];
+        car_format_values(MODULES[index], values);
+        for (int i = 0; i < 3; i++)
+            setEllipsis(g_carRows[slot].value[i], values[i], CAR_FIELD_W - 2);
+    }
+}
+
+static void refresh_root()
+{
+    car_refresh_all();
+}
+
+/**
+ * @brief Build one carousel row: module icon on the left, title and three
+ *        label/value lines on the right.
+ */
+static void car_create_row(int slot, lv_obj_t *parent)
+{
+    CarRow &r = g_carRows[slot];
+
+    r.row = lv_obj_create(parent);
+    lv_obj_set_size(r.row, SCREEN_W, CAR_ROW_H);
+    lv_obj_set_pos(r.row, 0, CAR_ROW_GAP + (lv_coord_t)(slot - 1) * CAR_ROW_H);
+    lv_obj_set_style_bg_opa(r.row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(r.row, 0, 0);
+    lv_obj_set_style_radius(r.row, 0, 0);
+    lv_obj_set_style_pad_all(r.row, 0, 0);
+    lv_obj_clear_flag(r.row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(r.row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(r.row, car_row_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)slot);
+    lv_obj_add_event_cb(r.row, car_gesture_cb, LV_EVENT_GESTURE, nullptr);
+
+    r.icon = lv_img_create(r.row);
+    apply_icon(r.icon, MODULES[0].icon, CAR_ICON_ZOOM);   /* 35 px -> 56 px */
+    lv_obj_align(r.icon, LV_ALIGN_LEFT_MID, CAR_ICON_X, 0);
+
+    r.title = lv_label_create(r.row);
+    lv_obj_set_pos(r.title, CAR_INFO_X, 12);
+    lv_obj_set_size(r.title, CAR_TITLE_W, 28);
+    lv_obj_set_style_text_color(r.title, ST_TEXT, 0);
+    lv_obj_set_style_text_font(r.title, fontTitle(), 0);
+    lv_obj_set_style_text_letter_space(r.title, 1, 0);
+    lv_label_set_long_mode(r.title, LV_LABEL_LONG_DOT);
+    lv_label_set_text(r.title, "");
+
+    for (int i = 0; i < 3; i++) {
+        const lv_coord_t y = 48 + (lv_coord_t)i * 30;
+
+        r.field[i] = lv_label_create(r.row);
+        lv_obj_set_pos(r.field[i], CAR_INFO_X, y);
+        lv_obj_set_size(r.field[i], 66, 22);
+        lv_obj_set_style_text_color(r.field[i], ST_MUTED, 0);
+        lv_obj_set_style_text_font(r.field[i], fontSmall(), 0);
+        lv_label_set_long_mode(r.field[i], LV_LABEL_LONG_DOT);
+        lv_label_set_text(r.field[i], "");
+
+        r.value[i] = lv_label_create(r.row);
+        lv_obj_set_pos(r.value[i], CAR_FIELD_X, y);
+        lv_obj_set_size(r.value[i], CAR_FIELD_W, 22);
+        lv_obj_set_style_text_align(r.value[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_style_text_color(r.value[i], ST_TEXT, 0);
+        lv_obj_set_style_text_font(r.value[i], fontValue(), 0);
+        lv_label_set_long_mode(r.value[i], LV_LABEL_LONG_DOT);
+        lv_label_set_text(r.value[i], "");
+    }
 }
 
 } // namespace
@@ -572,153 +757,79 @@ lv_obj_t *buildRoot(lv_obj_t *parent, CHAPPIE *dev)
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
 
-    header(root, "SETTINGS", nullptr, nullptr);
+    /* Slim title bar. No instructions, no placeholder glyphs. */
+    lv_obj_t *title = lv_label_create(root);
+    lv_obj_set_pos(title, 12, 4);
+    lv_obj_set_style_text_color(title, ST_TEXT, 0);
+    lv_obj_set_style_text_font(title, fontTitle(), 0);
+    lv_obj_set_style_text_letter_space(title, 1, 0);
+    lv_label_set_text(title, "SETTINGS");
 
-    /* Module counter, top right. */
-    g_modCounter = lv_label_create(root);
-    lv_label_set_text(g_modCounter, "01 / 08");
-    lv_obj_set_style_text_color(g_modCounter, ST_MUTED, 0);
-    lv_obj_set_style_text_font(g_modCounter, fontSmall(), 0);
-    lv_obj_set_style_text_letter_space(g_modCounter, 1, 0);
-    lv_obj_align(g_modCounter, LV_ALIGN_TOP_RIGHT, -10, 8);
+    /* Carousel viewport: clips the rows that slide in and out. */
+    g_carView = lv_obj_create(root);
+    lv_obj_set_pos(g_carView, 0, HEADER_H);
+    lv_obj_set_size(g_carView, SCREEN_W, CAR_VIEW_H);
+    lv_obj_set_style_bg_opa(g_carView, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g_carView, 0, 0);
+    lv_obj_set_style_radius(g_carView, 0, 0);
+    lv_obj_set_style_pad_all(g_carView, 0, 0);
+    lv_obj_clear_flag(g_carView, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_carView, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_carView, car_gesture_cb, LV_EVENT_GESTURE, nullptr);
 
-    /* Three-column module area. */
-    g_modLayer = lv_obj_create(root);
-    lv_obj_set_pos(g_modLayer, 8, 34);
-    lv_obj_set_size(g_modLayer, 264, 150);
-    lv_obj_set_style_bg_opa(g_modLayer, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(g_modLayer, 0, 0);
-    lv_obj_set_style_pad_all(g_modLayer, 0, 0);
-    lv_obj_clear_flag(g_modLayer, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(g_modLayer, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_modLayer, module_click_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_add_event_cb(g_modLayer, module_gesture_cb, LV_EVENT_GESTURE, nullptr);
+    for (int slot = 0; slot < 3; slot++)
+        car_create_row(slot, g_carView);
 
-    /* 1) Left: large white line icon. */
-    g_modIcon = lv_img_create(g_modLayer);
-    lv_obj_set_pos(g_modIcon, 0, 46);
-    lv_img_set_zoom(g_modIcon, 409);              /* 35 px -> ~56 px */
-    lv_obj_set_style_img_recolor(g_modIcon, ST_TEXT, 0);
-    lv_obj_set_style_img_recolor_opa(g_modIcon, 255, 0);
-    lv_obj_clear_flag(g_modIcon, LV_OBJ_FLAG_CLICKABLE);
+    /*
+     * Rail. A separate component of the page, never a child of a row and never
+     * reused as a module icon. Teal is the remaining track, orange is the
+     * selected part and is animated by car_update_rail().
+     */
+    lv_obj_t *rail = lv_obj_create(g_carView);
+    lv_obj_set_pos(rail, CAR_RAIL_X, CAR_RAIL_Y);
+    lv_obj_set_size(rail, CAR_RAIL_W, CAR_RAIL_H);
+    lv_obj_set_style_bg_color(rail, ST_TEAL, 0);
+    lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(rail, CAR_RAIL_W / 2, 0);
+    lv_obj_set_style_border_width(rail, 0, 0);
+    lv_obj_set_style_pad_all(rail, 0, 0);
+    lv_obj_clear_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(rail, LV_OBJ_FLAG_CLICKABLE);
 
-    /* 2) Middle: thin dual-colour vertical bar. */
-    lv_obj_t *bar = lv_obj_create(g_modLayer);
-    lv_obj_set_pos(bar, 76, 8);
-    lv_obj_set_size(bar, 4, 134);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(bar, 0, 0);
-    lv_obj_set_style_pad_all(bar, 0, 0);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+    g_carRailFill = lv_obj_create(rail);
+    lv_obj_set_pos(g_carRailFill, 0, 0);
+    lv_obj_set_size(g_carRailFill, CAR_RAIL_W, 2);
+    lv_obj_set_style_bg_color(g_carRailFill, ST_ORANGE, 0);
+    lv_obj_set_style_bg_opa(g_carRailFill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(g_carRailFill, CAR_RAIL_W / 2, 0);
+    lv_obj_set_style_border_width(g_carRailFill, 0, 0);
+    lv_obj_set_style_pad_all(g_carRailFill, 0, 0);
+    lv_obj_clear_flag(g_carRailFill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(g_carRailFill, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *barTop = lv_obj_create(bar);
-    lv_obj_set_pos(barTop, 0, 0);
-    lv_obj_set_size(barTop, 4, 66);
-    lv_obj_set_style_bg_color(barTop, ST_ORANGE, 0);
-    lv_obj_set_style_bg_opa(barTop, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(barTop, 2, 0);
-    lv_obj_set_style_border_width(barTop, 0, 0);
-    lv_obj_clear_flag(barTop, LV_OBJ_FLAG_CLICKABLE);
+    /* Position indicator, generated from the real module count. */
+    g_carIndexLabel = lv_label_create(root);
+    lv_obj_set_pos(g_carIndexLabel, 0, HEADER_H + CAR_VIEW_H + 2);
+    lv_obj_set_size(g_carIndexLabel, SCREEN_W, 22);
+    lv_obj_set_style_text_align(g_carIndexLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(g_carIndexLabel, ST_MUTED, 0);
+    lv_obj_set_style_text_font(g_carIndexLabel, fontSmall(), 0);
+    lv_obj_set_style_text_letter_space(g_carIndexLabel, 2, 0);
+    lv_label_set_text(g_carIndexLabel, "");
 
-    lv_obj_t *barBottom = lv_obj_create(bar);
-    lv_obj_set_pos(barBottom, 0, 68);
-    lv_obj_set_size(barBottom, 4, 66);
-    lv_obj_set_style_bg_color(barBottom, ST_TEAL, 0);
-    lv_obj_set_style_bg_opa(barBottom, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(barBottom, 2, 0);
-    lv_obj_set_style_border_width(barBottom, 0, 0);
-    lv_obj_clear_flag(barBottom, LV_OBJ_FLAG_CLICKABLE);
+    g_carSel = car_wrap(g_carHomeIndex);
+    g_carFrom = g_carSel;
+    g_carDir = 0;
+    g_carRailFrom = g_carSel * 256;
+    g_carRailTo = g_carRailFrom;
+    g_carAnimating = false;
+    for (int slot = 0; slot < 3; slot++)
+        car_bind_slot(slot, g_carSel + slot - 1);
+    car_reset_positions();
+    car_update_rail(0);
+    car_update_index_label();
+    car_refresh_all();
 
-    /* 3) Right: title + field/value lines. */
-    lv_obj_t *info = lv_obj_create(g_modLayer);
-    lv_obj_set_pos(info, 88, 0);
-    lv_obj_set_size(info, 176, 150);
-    lv_obj_set_style_bg_opa(info, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(info, 0, 0);
-    lv_obj_set_style_pad_all(info, 0, 0);
-    lv_obj_set_style_pad_row(info, 0, 0);
-    lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_clear_flag(info, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(info, LV_OBJ_FLAG_CLICKABLE);
-
-    g_modTitle = lv_label_create(info);
-    lv_obj_set_width(g_modTitle, LV_PCT(100));
-    lv_obj_set_style_text_color(g_modTitle, ST_TEXT, 0);
-    lv_obj_set_style_text_font(g_modTitle, fontTitle(), 0);
-    lv_obj_set_style_text_letter_space(g_modTitle, 1, 0);
-    lv_label_set_text(g_modTitle, "Wi-Fi");
-    lv_obj_set_style_pad_bottom(g_modTitle, 3, 0);
-    lv_obj_clear_flag(g_modTitle, LV_OBJ_FLAG_CLICKABLE);
-
-    for (int i = 0; i < 4; i++) {
-        g_modValues[i] = make_module_field(info, &g_modLabels[i]);
-    }
-
-    lv_obj_t *hint = lv_label_create(info);
-    lv_obj_set_width(hint, LV_PCT(100));
-    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_color(hint, ST_MUTED, 0);
-    lv_obj_set_style_text_font(hint, fontSmall(), 0);
-    lv_label_set_text(hint, "TAP TO OPEN  " LV_SYMBOL_RIGHT);
-    lv_obj_clear_flag(hint, LV_OBJ_FLAG_CLICKABLE);
-
-    /* Bottom navigation: chevrons + module dots. */
-    lv_obj_t *prev = lv_btn_create(root);
-    lv_obj_set_pos(prev, 8, 192);
-    lv_obj_set_size(prev, 34, 34);
-    lv_obj_set_style_bg_color(prev, ST_PANEL, 0);
-    lv_obj_set_style_bg_opa(prev, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(prev, 17, 0);
-    lv_obj_set_style_border_width(prev, 0, 0);
-    lv_obj_set_style_shadow_width(prev, 0, 0);
-    lv_obj_add_event_cb(prev, mod_prev_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *prevLabel = lv_label_create(prev);
-    lv_label_set_text(prevLabel, LV_SYMBOL_LEFT);
-    lv_obj_set_style_text_color(prevLabel, ST_TEXT, 0);
-    lv_obj_set_style_text_font(prevLabel, &lv_font_montserrat_18, 0);
-    lv_obj_center(prevLabel);
-
-    lv_obj_t *next = lv_btn_create(root);
-    lv_obj_set_pos(next, 238, 192);
-    lv_obj_set_size(next, 34, 34);
-    lv_obj_set_style_bg_color(next, ST_PANEL, 0);
-    lv_obj_set_style_bg_opa(next, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(next, 17, 0);
-    lv_obj_set_style_border_width(next, 0, 0);
-    lv_obj_set_style_shadow_width(next, 0, 0);
-    lv_obj_add_event_cb(next, mod_next_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *nextLabel = lv_label_create(next);
-    lv_label_set_text(nextLabel, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_color(nextLabel, ST_TEXT, 0);
-    lv_obj_set_style_text_font(nextLabel, &lv_font_montserrat_18, 0);
-    lv_obj_center(nextLabel);
-
-    lv_obj_t *dots = lv_obj_create(root);
-    lv_obj_set_pos(dots, 84, 203);
-    lv_obj_set_size(dots, 112, 12);
-    lv_obj_set_style_bg_opa(dots, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(dots, 0, 0);
-    lv_obj_set_style_pad_all(dots, 0, 0);
-    lv_obj_set_style_pad_column(dots, 5, 0);
-    lv_obj_set_flex_flow(dots, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(dots, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(dots, LV_OBJ_FLAG_CLICKABLE);
-
-    for (int i = 0; i < MODULE_COUNT; i++) {
-        lv_obj_t *dot = lv_obj_create(dots);
-        lv_obj_set_size(dot, 6, 6);
-        lv_obj_set_style_radius(dot, 3, 0);
-        lv_obj_set_style_bg_color(dot, COL_DOT_IDLE, 0);
-        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(dot, 0, 0);
-        lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-        g_modDot[i] = dot;
-    }
-
-    select_module(g_modIndex, 0);
     return root;
 }
 
@@ -789,24 +900,23 @@ static void rebuild_scan_list()
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(row, 8, 0);
         lv_obj_set_style_border_width(row, 0, 0);
-        lv_obj_set_style_pad_left(row, 10, 0);
-        lv_obj_set_style_pad_right(row, 8, 0);
         lv_obj_set_style_pad_all(row, 0, 0);
-        lv_obj_set_style_pad_left(row, 10, 0);
-        lv_obj_set_style_pad_right(row, 8, 0);
-        lv_obj_set_style_pad_column(row, 6, 0);
-        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
+        /* Explicit widths keep the name on one line. A flex row let a long
+         * SSID such as "Chappie2-sasfl" wrap at the hyphen and push the row
+         * past its 34 px height. */
         lv_obj_t *name = lv_label_create(row);
-        lv_label_set_text(name, ssid.c_str());
+        lv_obj_set_pos(name, 10, 5);
+        lv_obj_set_size(name, 146, 24);
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-        lv_obj_set_flex_grow(name, 1);
+        setEllipsis(name, ssid.c_str(), 144);
         lv_obj_set_style_text_color(name, ST_TEXT, 0);
         lv_obj_set_style_text_font(name, fontSmall(), 0);
 
         lv_obj_t *lock = lv_label_create(row);
+        lv_obj_set_pos(lock, 160, 5);
+        lv_obj_set_size(lock, 34, 24);
         lv_label_set_text(lock, secure ? "WPA" : "OPEN");
         lv_obj_set_style_text_color(lock, secure ? ST_MUTED : ST_TEAL, 0);
         lv_obj_set_style_text_font(lock, fontSmall(), 0);
@@ -814,6 +924,9 @@ static void rebuild_scan_list()
         char rb[16];
         snprintf(rb, sizeof(rb), "%d", (int)rssi);
         lv_obj_t *sig = lv_label_create(row);
+        lv_obj_set_pos(sig, 196, 5);
+        lv_obj_set_size(sig, 58, 24);
+        lv_obj_set_style_text_align(sig, LV_TEXT_ALIGN_RIGHT, 0);
         lv_label_set_text(sig, rb);
         lv_obj_set_style_text_color(sig, ST_MUTED, 0);
         lv_obj_set_style_text_font(sig, fontSmall(), 0);
@@ -1047,7 +1160,7 @@ static void refresh_wifi()
     } else {
         net = "--";
     }
-    setValue(g_wifi.network, net.c_str());
+    setEllipsis(g_wifi.network, net.c_str(), 138);
     setValue(g_wifi.ip, g_dev->Wf.LocalIP().c_str());
 
     bool ap = g_dev->Wf.isAPActive();
@@ -1103,7 +1216,7 @@ static void refresh_wifi()
 
 static lv_obj_t *buildWifi(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "Wi-Fi");
+    lv_obj_t *root = shell(parent, Wifi);
     lv_obj_t *page = STheme::page(root);
 
     switchRow(page, "Wi-Fi", g_dev->Wf.isWiFiEnabled(), wifi_toggle_cb, nullptr, &g_wifi.sw);
@@ -1124,7 +1237,7 @@ static lv_obj_t *buildWifi(lv_obj_t *parent)
 
     section(page, "SETUP HOTSPOT");
     switchRow(page, "Config AP", g_dev->Wf.isAPActive(), ap_toggle_cb, nullptr, &g_wifi.apSw);
-    g_wifi.apName = infoRow(page, "AP name", "Chappie-AP").value;
+    g_wifi.apName = infoRow(page, "AP name", ConfigWiFi::AP_SSID).value;
     g_wifi.apAddr = infoRow(page, "Address", "--").value;
     g_wifi.apClients = infoRow(page, "Clients", "--").value;
 
@@ -1156,10 +1269,13 @@ static lv_obj_t *buildWifi(lv_obj_t *parent)
 
     section(page, "PROVISIONING");
     lv_obj_t *hint = lv_label_create(page);
-    lv_label_set_text(hint,
-        "1. Turn on Config AP\n2. Join the Chappie-AP hotspot\n"
-        "3. Open http://192.168.4.1\n4. Pick a network and connect\n\n"
-        "AP password: chappie123");
+    char hintText[208];
+    snprintf(hintText, sizeof(hintText),
+             "1. Turn on Config AP\n2. Join the %s hotspot\n"
+             "3. Open http://192.168.4.1\n4. Pick a network and connect\n\n"
+             "AP password: %s",
+             ConfigWiFi::AP_SSID, ConfigWiFi::AP_PASSWORD);
+    lv_label_set_text(hint, hintText);
     lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(hint, LV_PCT(100));
     lv_obj_set_style_text_color(hint, ST_MUTED, 0);
@@ -1268,8 +1384,9 @@ static void rebuild_bond_list()
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *l = lv_label_create(row);
-        lv_label_set_text(l, addr.c_str());
         lv_obj_set_flex_grow(l, 1);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+        setEllipsis(l, addr.c_str(), 168);
         lv_obj_set_style_text_color(l, ST_TEXT, 0);
         lv_obj_set_style_text_font(l, fontSmall(), 0);
 
@@ -1284,9 +1401,9 @@ static void refresh_ble()
     if (!g_dev) return;
     setSwitch(g_ble.sw, g_dev->Ble.isEnabled());
     setValue(g_ble.status, g_dev->Ble.stateText());
-    setValue(g_ble.name, g_dev->Ble.getDeviceName().c_str());
+    setEllipsis(g_ble.name, g_dev->Ble.getDeviceName().c_str(), 138);
     String addr = g_dev->Ble.getConnectedAddress();
-    setValue(g_ble.addr, addr.length() ? addr.c_str() : "--");
+    setEllipsis(g_ble.addr, addr.length() ? addr.c_str() : "--", 138);
 
     char b[32];
     snprintf(b, sizeof(b), "%d", g_dev->Ble.getBondCount());
@@ -1315,7 +1432,7 @@ static void refresh_ble()
 
 static lv_obj_t *buildBluetooth(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "Bluetooth");
+    lv_obj_t *root = shell(parent, Bluetooth);
     lv_obj_t *page = STheme::page(root);
 
     switchRow(page, "Bluetooth", g_dev->Ble.isEnabled(), ble_toggle_cb, nullptr, &g_ble.sw);
@@ -1446,7 +1563,7 @@ static void refresh_time()
 
 static lv_obj_t *buildTime(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "Time");
+    lv_obj_t *root = shell(parent, Time);
     lv_obj_t *page = STheme::page(root);
 
     g_time.time = infoRow(page, "Time", "--:--:--").value;
@@ -1540,7 +1657,7 @@ static void refresh_display()
 
 static lv_obj_t *buildDisplay(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "Display");
+    lv_obj_t *root = shell(parent, Display);
     lv_obj_t *page = STheme::page(root);
 
     uint16_t pct = (uint16_t)g_dev->Lcd.getBrightness() * 100 / 255;
@@ -1674,7 +1791,7 @@ static void refresh_battery()
 
 static lv_obj_t *buildBattery(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "Battery");
+    lv_obj_t *root = shell(parent, Battery);
     lv_obj_t *page = STheme::page(root);
 
     /* Large readout */
@@ -1782,7 +1899,7 @@ static lv_obj_t *buildBattery(lv_obj_t *parent)
 
 static lv_obj_t *buildKeys(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "Buttons");
+    lv_obj_t *root = shell(parent, Keys);
     lv_obj_t *page = STheme::page(root);
 
     section(page, "A BUTTON - GPIO9 / PWR_CTRL");
@@ -1810,81 +1927,47 @@ static lv_obj_t *buildKeys(lv_obj_t *parent)
 }
 
 /* ========================================================================= */
-/* Device test page                                                          */
+/* Device page and full-screen hardware tests                                */
 /* ========================================================================= */
 
 static struct {
-    lv_obj_t *pad = nullptr;
-    lv_obj_t *dot = nullptr;
-    lv_obj_t *coord = nullptr;
     lv_obj_t *touch = nullptr;
 } g_test;
 
-static lv_obj_t *g_colorOverlay = nullptr;
-static lv_timer_t *g_colorTimer = nullptr;
+/* ---- Full-screen touch test --------------------------------------------- */
 
-static void color_overlay_delete(lv_event_t *e)
+#define TOUCH_TRAIL_MAX 24
+
+static lv_obj_t *g_touchTest = nullptr;
+static lv_obj_t *g_touchTestCoord = nullptr;
+static lv_obj_t *g_touchTestDot = nullptr;
+static lv_obj_t *g_touchTestTrail[TOUCH_TRAIL_MAX] = {nullptr};
+static int g_touchTestTrailIdx = 0;
+static int g_touchTestLastX = -100;
+static int g_touchTestLastY = -100;
+
+static void touch_test_delete_cb(lv_event_t *e)
 {
     (void)e;
-    if (g_colorTimer) {
-        lv_timer_del(g_colorTimer);
-        g_colorTimer = nullptr;
+    g_touchTest = nullptr;
+    g_touchTestCoord = nullptr;
+    g_touchTestDot = nullptr;
+    for (int i = 0; i < TOUCH_TRAIL_MAX; i++)
+        g_touchTestTrail[i] = nullptr;
+    g_touchTestTrailIdx = 0;
+}
+
+static void touch_test_event_cb(lv_event_t *e)
+{
+    const lv_event_code_t code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        if (g_touchTestCoord)
+            lv_label_set_text(g_touchTestCoord, "Touch released");
+        if (g_touchTestDot)
+            lv_obj_add_flag(g_touchTestDot, LV_OBJ_FLAG_HIDDEN);
+        return;
     }
-    g_colorOverlay = nullptr;
-}
-
-static void color_overlay_click(lv_event_t *e)
-{
-    lv_obj_del(lv_event_get_target(e));
-}
-
-static void color_overlay_timeout(lv_timer_t *t)
-{
-    g_colorTimer = nullptr;         /* auto-deleted by repeat_count = 1 */
-    lv_obj_t *o = (lv_obj_t *)t->user_data;
-    if (o)
-        lv_obj_del(o);
-}
-
-static void open_color_test(lv_color_t color, lv_color_t hint_color)
-{
-    if (g_colorOverlay)
-        lv_obj_del(g_colorOverlay);
-
-    lv_obj_t *o = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(o, SCREEN_W, SCREEN_H);
-    lv_obj_set_pos(o, 0, 0);
-    lv_obj_set_style_bg_color(o, color, 0);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(o, 0, 0);
-    lv_obj_set_style_radius(o, 0, 0);
-    lv_obj_set_style_pad_all(o, 0, 0);
-    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
-    g_colorOverlay = o;
-
-    lv_obj_add_event_cb(o, color_overlay_delete, LV_EVENT_DELETE, nullptr);
-    lv_obj_add_event_cb(o, color_overlay_click, LV_EVENT_CLICKED, nullptr);
-
-    lv_obj_t *hint = lv_label_create(o);
-    lv_label_set_text(hint, "Tap to exit");
-    lv_obj_set_style_text_color(hint, hint_color, 0);
-    lv_obj_set_style_text_font(hint, fontValue(), 0);
-    lv_obj_center(hint);
-
-    g_colorTimer = lv_timer_create(color_overlay_timeout, 5000, o);
-    lv_timer_set_repeat_count(g_colorTimer, 1);
-}
-
-static void color_red_cb(lv_event_t *e)   { (void)e; open_color_test(lv_color_hex(0xE5484D), ST_TEXT); }
-static void color_green_cb(lv_event_t *e) { (void)e; open_color_test(lv_color_hex(0x18C7A8), ST_BG); }
-static void color_blue_cb(lv_event_t *e)  { (void)e; open_color_test(lv_color_hex(0x3B82F6), ST_TEXT); }
-static void color_white_cb(lv_event_t *e) { (void)e; open_color_test(lv_color_hex(0xFFFFFF), ST_BG); }
-static void color_black_cb(lv_event_t *e) { (void)e; open_color_test(lv_color_hex(0x000000), ST_TEXT); }
-
-static void touch_pad_cb(lv_event_t *e)
-{
-    lv_event_code_t code = lv_event_get_code(e);
     if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESSING)
         return;
 
@@ -1895,23 +1978,247 @@ static void touch_pad_cb(lv_event_t *e)
     lv_point_t p;
     lv_indev_get_point(indev, &p);
 
-    lv_obj_t *pad = lv_event_get_target(e);
+    lv_obj_t *area = lv_event_get_target(e);
     lv_area_t a;
-    lv_obj_get_coords(pad, &a);
+    lv_obj_get_coords(area, &a);
     int x = p.x - a.x1;
     int y = p.y - a.y1;
-    int w = a.x2 - a.x1;
-    int h = a.y2 - a.y1;
     if (x < 0) x = 0;
     if (y < 0) y = 0;
-    if (x > w) x = w;
-    if (y > h) y = h;
+    if (x > a.x2 - a.x1) x = a.x2 - a.x1;
+    if (y > a.y2 - a.y1) y = a.y2 - a.y1;
 
-    set_text_buf(g_test.coord, "X:%d  Y:%d", x, y);
-    if (g_test.dot) {
-        lv_obj_clear_flag(g_test.dot, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(g_test.dot, x - 6, y - 6);
+    set_text_buf(g_touchTestCoord, "X %d   Y %d", x, y);
+
+    if (g_touchTestDot) {
+        lv_obj_clear_flag(g_touchTestDot, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(g_touchTestDot, x - 8, y - 8);
     }
+
+    /* Trail uses a fixed pool of dots and only moves them, so a long drag
+     * never allocates new objects. */
+    if (abs(x - g_touchTestLastX) + abs(y - g_touchTestLastY) >= 6) {
+        lv_obj_t *dot = g_touchTestTrail[g_touchTestTrailIdx];
+        g_touchTestTrailIdx = (g_touchTestTrailIdx + 1) % TOUCH_TRAIL_MAX;
+        if (dot) {
+            lv_obj_set_pos(dot, x - 3, y - 3);
+            lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        }
+        g_touchTestLastX = x;
+        g_touchTestLastY = y;
+    }
+}
+
+static void open_touch_test()
+{
+    if (g_touchTest)
+        return;
+
+    lv_obj_t *o = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(o, SCREEN_W, SCREEN_H);
+    lv_obj_set_pos(o, 0, 0);
+    lv_obj_set_style_bg_color(o, ST_BG, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_set_style_radius(o, 0, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    g_touchTest = o;
+    g_touchTestTrailIdx = 0;
+    g_touchTestLastX = -100;
+    g_touchTestLastY = -100;
+
+    lv_obj_add_event_cb(o, touch_test_delete_cb, LV_EVENT_DELETE, nullptr);
+    lv_obj_add_event_cb(o, touch_test_event_cb, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(o, touch_test_event_cb, LV_EVENT_PRESSING, nullptr);
+    lv_obj_add_event_cb(o, touch_test_event_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(o, touch_test_event_cb, LV_EVENT_PRESS_LOST, nullptr);
+
+    for (int i = 0; i < TOUCH_TRAIL_MAX; i++) {
+        lv_obj_t *dot = lv_obj_create(o);
+        lv_obj_set_size(dot, 6, 6);
+        lv_obj_set_style_radius(dot, 3, 0);
+        lv_obj_set_style_bg_color(dot, ST_TEAL, 0);
+        lv_obj_set_style_bg_opa(dot, 140, 0);
+        lv_obj_set_style_border_width(dot, 0, 0);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        g_touchTestTrail[i] = dot;
+    }
+
+    g_touchTestDot = lv_obj_create(o);
+    lv_obj_set_size(g_touchTestDot, 16, 16);
+    lv_obj_set_style_radius(g_touchTestDot, 8, 0);
+    lv_obj_set_style_bg_opa(g_touchTestDot, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g_touchTestDot, 2, 0);
+    lv_obj_set_style_border_color(g_touchTestDot, ST_ORANGE, 0);
+    lv_obj_clear_flag(g_touchTestDot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(g_touchTestDot, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(g_touchTestDot, LV_OBJ_FLAG_HIDDEN);
+
+    g_touchTestCoord = lv_label_create(o);
+    lv_obj_set_pos(g_touchTestCoord, 8, 4);
+    lv_obj_set_size(g_touchTestCoord, 264, 22);
+    lv_obj_set_style_text_color(g_touchTestCoord, ST_MUTED, 0);
+    lv_obj_set_style_text_font(g_touchTestCoord, fontValue(), 0);
+    lv_label_set_text(g_touchTestCoord, "Touch anywhere");
+
+    lv_obj_t *hint = lv_label_create(o);
+    lv_obj_set_pos(hint, 0, SCREEN_H - 22);
+    lv_obj_set_size(hint, SCREEN_W, 18);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(hint, ST_MUTED, 0);
+    lv_obj_set_style_text_font(hint, fontSmall(), 0);
+    lv_label_set_text(hint, "B: exit");
+}
+
+/* ---- Full-screen display test ------------------------------------------- */
+
+#define DISP_TEST_COUNT 5
+
+static const lv_color_t DISP_TEST_COLORS[DISP_TEST_COUNT] = {
+    lv_color_hex(0xFF0000),
+    lv_color_hex(0x00FF00),
+    lv_color_hex(0x0000FF),
+    lv_color_hex(0xFFFFFF),
+    lv_color_hex(0x000000),
+};
+static const char *const DISP_TEST_NAMES[DISP_TEST_COUNT] = {
+    "RED", "GREEN", "BLUE", "WHITE", "BLACK",
+};
+
+static lv_obj_t *g_dispTest = nullptr;
+static lv_obj_t *g_dispTestHint = nullptr;
+static lv_obj_t *g_dispTestHelp = nullptr;
+static int g_dispTestIndex = 0;
+
+static void display_test_delete_cb(lv_event_t *e)
+{
+    (void)e;
+    g_dispTest = nullptr;
+    g_dispTestHint = nullptr;
+    g_dispTestHelp = nullptr;
+}
+
+static void display_test_apply()
+{
+    if (!g_dispTest)
+        return;
+
+    lv_obj_set_style_bg_color(g_dispTest, DISP_TEST_COLORS[g_dispTestIndex], 0);
+    /* Keep the hint readable on every pattern. */
+    const lv_color_t fg = (g_dispTestIndex == 3 || g_dispTestIndex == 1) ? lv_color_hex(0x000000)
+                                                                       : ST_TEXT;
+    if (g_dispTestHint) {
+        lv_obj_set_style_text_color(g_dispTestHint, fg, 0);
+        set_text_buf(g_dispTestHint, "%s  %d/%d", DISP_TEST_NAMES[g_dispTestIndex],
+                     g_dispTestIndex + 1, DISP_TEST_COUNT);
+    }
+    if (g_dispTestHelp)
+        lv_obj_set_style_text_color(g_dispTestHelp, fg, 0);
+}
+
+static void display_test_click_cb(lv_event_t *e)
+{
+    (void)e;
+    g_dispTestIndex = (g_dispTestIndex + 1) % DISP_TEST_COUNT;
+    display_test_apply();
+}
+
+static void open_display_test()
+{
+    if (g_dispTest)
+        return;
+
+    lv_obj_t *o = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(o, SCREEN_W, SCREEN_H);
+    lv_obj_set_pos(o, 0, 0);
+    lv_obj_set_style_bg_color(o, DISP_TEST_COLORS[0], 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_set_style_radius(o, 0, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    g_dispTest = o;
+    g_dispTestIndex = 0;
+
+    lv_obj_add_event_cb(o, display_test_delete_cb, LV_EVENT_DELETE, nullptr);
+    lv_obj_add_event_cb(o, display_test_click_cb, LV_EVENT_CLICKED, nullptr);
+
+    g_dispTestHint = lv_label_create(o);
+    lv_obj_set_pos(g_dispTestHint, 0, 106);
+    lv_obj_set_size(g_dispTestHint, SCREEN_W, 26);
+    lv_obj_set_style_text_align(g_dispTestHint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(g_dispTestHint, fontValue(), 0);
+    lv_label_set_text(g_dispTestHint, "");
+
+    lv_obj_t *hint = lv_label_create(o);
+    lv_obj_set_pos(hint, 0, 134);
+    lv_obj_set_size(hint, SCREEN_W, 18);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(hint, fontSmall(), 0);
+    lv_label_set_text(hint, "Tap: next pattern    B: exit");
+    g_dispTestHelp = hint;
+    display_test_apply();
+}
+
+/* ---- Page --------------------------------------------------------------- */
+
+static void touch_test_open_cb(lv_event_t *e)
+{
+    (void)e;
+    open_touch_test();
+}
+
+static void display_test_open_cb(lv_event_t *e)
+{
+    (void)e;
+    open_display_test();
+}
+
+static lv_obj_t *entry_row(lv_obj_t *parent, const char *title, const char *subtitle,
+                           lv_event_cb_t cb)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), 46);
+    lv_obj_set_style_bg_color(row, ST_PANEL, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, ST_PANEL_HI, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(row, 9, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t *t = lv_label_create(row);
+    lv_obj_set_pos(t, 12, 5);
+    lv_obj_set_size(t, 190, 22);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+    setEllipsis(t, title, 188);
+    lv_obj_set_style_text_color(t, ST_TEXT, 0);
+    lv_obj_set_style_text_font(t, fontValue(), 0);
+
+    lv_obj_t *s = lv_label_create(row);
+    lv_obj_set_pos(s, 12, 25);
+    lv_obj_set_size(s, 190, 16);
+    lv_label_set_long_mode(s, LV_LABEL_LONG_DOT);
+    setEllipsis(s, subtitle, 188);
+    lv_obj_set_style_text_color(s, ST_MUTED, 0);
+    lv_obj_set_style_text_font(s, fontSmall(), 0);
+
+    lv_obj_t *go = lv_label_create(row);
+    lv_obj_set_pos(go, 210, 12);
+    lv_obj_set_size(go, 44, 22);
+    lv_obj_set_style_text_align(go, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_text(go, "OPEN");
+    lv_obj_set_style_text_color(go, ST_TEAL, 0);
+    lv_obj_set_style_text_font(go, fontSmall(), 0);
+
+    return row;
 }
 
 static void refresh_test()
@@ -1921,70 +2228,20 @@ static void refresh_test()
     setDanger(g_test.touch, !g_dev->Tp.isReady());
 }
 
-static void color_button(lv_obj_t *parent, const char *text, lv_color_t bg,
-                         lv_color_t fg, lv_event_cb_t cb)
-{
-    lv_obj_t *btn = lv_btn_create(parent);
-    lv_obj_set_size(btn, LV_PCT(100), 34);
-    lv_obj_set_style_bg_color(btn, bg, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(btn, 8, 0);
-    lv_obj_set_style_border_width(btn, 0, 0);
-    lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_t *l = lv_label_create(btn);
-    lv_label_set_text(l, text);
-    lv_obj_set_style_text_color(l, fg, 0);
-    lv_obj_set_style_text_font(l, fontValue(), 0);
-    lv_obj_center(l);
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, nullptr);
-}
-
 static lv_obj_t *buildTest(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "Device test");
+    lv_obj_t *root = shell(parent, Test);
     lv_obj_t *page = STheme::page(root);
 
-    section(page, "TOUCH");
+    section(page, "HARDWARE TEST");
+    entry_row(page, "Touch test", "Full screen, live coordinates", touch_test_open_cb);
+    entry_row(page, "Display test", "Full screen colour patterns", display_test_open_cb);
+
+    section(page, "DEVICE");
     g_test.touch = infoRow(page, "Touch controller", "OK").value;
     infoRow(page, "Multi-touch", "Not supported");
     infoRow(page, "Touch IC", "CST816D");
 
-    g_test.pad = lv_obj_create(page);
-    lv_obj_set_size(g_test.pad, LV_PCT(100), 62);
-    lv_obj_set_style_bg_color(g_test.pad, ST_PANEL_HI, 0);
-    lv_obj_set_style_bg_opa(g_test.pad, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(g_test.pad, 9, 0);
-    lv_obj_set_style_border_width(g_test.pad, 1, 0);
-    lv_obj_set_style_border_color(g_test.pad, ST_LINE, 0);
-    lv_obj_set_style_pad_all(g_test.pad, 0, 0);
-    lv_obj_clear_flag(g_test.pad, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(g_test.pad, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_test.pad, touch_pad_cb, LV_EVENT_ALL, nullptr);
-
-    g_test.coord = lv_label_create(g_test.pad);
-    lv_label_set_text(g_test.coord, "Touch here");
-    lv_obj_set_style_text_color(g_test.coord, ST_MUTED, 0);
-    lv_obj_set_style_text_font(g_test.coord, fontSmall(), 0);
-    lv_obj_align(g_test.coord, LV_ALIGN_CENTER, 0, 0);
-
-    g_test.dot = lv_obj_create(g_test.pad);
-    lv_obj_set_size(g_test.dot, 12, 12);
-    lv_obj_set_style_bg_color(g_test.dot, ST_TEAL, 0);
-    lv_obj_set_style_bg_opa(g_test.dot, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(g_test.dot, 6, 0);
-    lv_obj_set_style_border_width(g_test.dot, 0, 0);
-    lv_obj_clear_flag(g_test.dot, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(g_test.dot, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(g_test.dot, LV_OBJ_FLAG_HIDDEN);
-
-    section(page, "DISPLAY");
-    color_button(page, "Red", lv_color_hex(0xE5484D), ST_TEXT, color_red_cb);
-    color_button(page, "Green", lv_color_hex(0x18C7A8), ST_BG, color_green_cb);
-    color_button(page, "Blue", lv_color_hex(0x3B82F6), ST_TEXT, color_blue_cb);
-    color_button(page, "White", lv_color_hex(0xFFFFFF), ST_BG, color_white_cb);
-    color_button(page, "Black", lv_color_hex(0x000000), ST_TEXT, color_black_cb);
-
-    section(page, "HARDWARE INFORMATION");
     esp_chip_info_t chip;
     esp_chip_info(&chip);
     char buf[32];
@@ -1997,7 +2254,6 @@ static lv_obj_t *buildTest(lv_obj_t *parent)
     snprintf(buf, sizeof(buf), "%u MB", (unsigned)(ESP.getPsramSize() / (1024 * 1024)));
     infoRow(page, "PSRAM", buf);
     infoRow(page, "Display", "ST7789V 280x240");
-    infoRow(page, "Touch", "CST816D");
     infoRow(page, "PMIC", "AXP173");
 
     refresh_test();
@@ -2027,7 +2283,7 @@ static void refresh_about()
 
 static lv_obj_t *buildAbout(lv_obj_t *parent)
 {
-    lv_obj_t *root = shell(parent, "About");
+    lv_obj_t *root = shell(parent, About);
     lv_obj_t *page = STheme::page(root);
 
     section(page, "DEVICE");
@@ -2097,17 +2353,24 @@ void setCurrent(PageId page) { g_current = page; }
 
 bool handleBack()
 {
+    /* Full-screen hardware tests own B first: they cover the whole display
+     * and must return to the Device page, not to the carousel. */
+    if (g_touchTest) {
+        lv_obj_del(g_touchTest);
+        g_touchTest = nullptr;
+        return true;
+    }
+    if (g_dispTest) {
+        lv_obj_del(g_dispTest);
+        g_dispTest = nullptr;
+        return true;
+    }
     if (g_pwOverlay) {
         close_password_dialog();
         return true;
     }
     if (g_confirmOverlay) {
         confirm_close();
-        return true;
-    }
-    if (g_colorOverlay) {
-        lv_obj_del(g_colorOverlay);      /* delete handler releases the timer */
-        g_colorOverlay = nullptr;
         return true;
     }
     if (g_current != Root) {
@@ -2122,28 +2385,35 @@ void destroy()
 {
     close_password_dialog();
     confirm_close();
-    if (g_colorOverlay) {
-        lv_obj_del(g_colorOverlay);   /* delete handler releases the timer */
-        g_colorOverlay = nullptr;
+    if (g_touchTest) {
+        lv_obj_del(g_touchTest);
+        g_touchTest = nullptr;
     }
-    if (g_colorTimer) {
-        lv_timer_del(g_colorTimer);
-        g_colorTimer = nullptr;
+    if (g_dispTest) {
+        lv_obj_del(g_dispTest);
+        g_dispTest = nullptr;
+    }
+    if (g_carView) {
+        lv_anim_del(g_carView, car_anim_exec);
     }
     g_dev = nullptr;
     g_current = Root;
 
     /* Drop pointers into the page tree that is about to be deleted. */
-    g_modLayer = nullptr;
-    g_modIcon = nullptr;
-    g_modTitle = nullptr;
-    g_modCounter = nullptr;
-    for (int i = 0; i < 4; i++) {
-        g_modLabels[i] = nullptr;
-        g_modValues[i] = nullptr;
+    g_carView = nullptr;
+    g_carRailFill = nullptr;
+    g_carIndexLabel = nullptr;
+    g_carAnimating = false;
+    g_carSel = 0;
+    g_carFrom = 0;
+    g_carDir = 0;
+    g_carHomeIndex = 0;
+    g_carRailFrom = 0;
+    g_carRailTo = 0;
+    for (int slot = 0; slot < 3; slot++) {
+        g_carRows[slot] = {};
+        g_carSlotIndex[slot] = -1;
     }
-    for (int i = 0; i < 8; i++)
-        g_modDot[i] = nullptr;
 
     g_wifi = {};
     g_ble = {};

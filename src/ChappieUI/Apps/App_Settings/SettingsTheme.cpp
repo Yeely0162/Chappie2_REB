@@ -126,80 +126,41 @@ lv_obj_t *section(lv_obj_t *parent, const char *title)
     return label;
 }
 
-RowRefs menuRow(lv_obj_t *parent, const void *icon, const char *title,
-                const char *value, lv_event_cb_t cb, void *user_data)
+void setEllipsis(lv_obj_t *label, const char *text, lv_coord_t maxW)
 {
-    RowRefs refs;
-    lv_obj_t *row = lv_obj_create(parent);
-    refs.row = row;
-    lv_obj_set_size(row, LV_PCT(100), 40);
-    lv_obj_set_style_bg_color(row, ST_PANEL, 0);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(row, ST_PANEL_HI, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_radius(row, 9, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    lv_obj_set_style_pad_left(row, 10, 0);
-    lv_obj_set_style_pad_right(row, 8, 0);
-    lv_obj_set_style_pad_top(row, 0, 0);
-    lv_obj_set_style_pad_bottom(row, 0, 0);
-    lv_obj_set_style_pad_column(row, 8, 0);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    if (!label)
+        return;
+    if (!text)
+        text = "";
 
-    if (icon) {
-        lv_obj_t *img = lv_img_create(row);
-        lv_img_set_src(img, icon);
-        lv_img_set_zoom(img, 183);      /* 35 px source -> ~25 px */
-        lv_obj_set_size(img, 25, 25);   /* let flex size the scaled icon */
-        lv_obj_set_style_img_recolor(img, ST_TEXT, 0);
-        lv_obj_set_style_img_recolor_opa(img, 255, 0);
+    const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+    if (!font)
+        font = (const lv_font_t *)LV_FONT_DEFAULT;
+
+    char buf[136];
+    size_t len = strlen(text);
+    if (len > 128)
+        len = 128;                 /* keep room for the ellipsis */
+    memcpy(buf, text, len);
+    buf[len] = '\0';
+
+    if (lv_txt_get_width(buf, len, font, 0, LV_TEXT_FLAG_NONE) > maxW) {
+        static const char dots[] = "...";
+        const lv_coord_t dots_w = lv_txt_get_width(dots, 3, font, 0, LV_TEXT_FLAG_NONE);
+
+        while (len > 0) {
+            /* Never cut in the middle of a UTF-8 sequence. */
+            do {
+                len--;
+            } while (len > 0 && ((unsigned char)buf[len] & 0xC0) == 0x80);
+            buf[len] = '\0';
+            if (lv_txt_get_width(buf, len, font, 0, LV_TEXT_FLAG_NONE) + dots_w <= maxW) {
+                strcat(buf, dots);
+                break;
+            }
+        }
     }
-
-    /* Thin two-colour status bar. */
-    lv_obj_t *bar = lv_obj_create(row);
-    lv_obj_set_size(bar, 3, 20);
-    plain(bar);
-    lv_obj_t *top = lv_obj_create(bar);
-    lv_obj_set_size(top, 3, 10);
-    lv_obj_set_pos(top, 0, 0);
-    plain(top);
-    lv_obj_set_style_bg_color(top, ST_ORANGE, 0);
-    lv_obj_set_style_bg_opa(top, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(top, 2, 0);
-    lv_obj_t *bottom = lv_obj_create(bar);
-    lv_obj_set_size(bottom, 3, 10);
-    lv_obj_set_pos(bottom, 0, 10);
-    plain(bottom);
-    lv_obj_set_style_bg_color(bottom, ST_TEAL, 0);
-    lv_obj_set_style_bg_opa(bottom, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(bottom, 2, 0);
-
-    lv_obj_t *label = lv_label_create(row);
-    lv_label_set_text(label, title);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_set_flex_grow(label, 1);
-    lv_obj_set_style_text_color(label, ST_MUTED, 0);
-    lv_obj_set_style_text_font(label, fontSmall(), 0);
-
-    lv_obj_t *val = lv_label_create(row);
-    lv_label_set_text(val, value ? value : "");
-    lv_label_set_long_mode(val, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(val, 92);
-    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_color(val, ST_TEXT, 0);
-    lv_obj_set_style_text_font(val, fontValue(), 0);
-    refs.value = val;
-
-    lv_obj_t *chev = lv_label_create(row);
-    lv_label_set_text(chev, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_color(chev, ST_MUTED, 0);
-    lv_obj_set_style_text_font(chev, &lv_font_montserrat_12, 0);
-
-    if (cb)
-        lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, user_data);
-
-    return refs;
+    setText(label, buf);
 }
 
 RowRefs infoRow(lv_obj_t *parent, const char *label, const char *value)

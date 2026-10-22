@@ -57,13 +57,6 @@ lv_obj_t *page(lv_obj_t *parent);
 lv_obj_t *section(lv_obj_t *parent, const char *title);
 
 /**
- * @brief Main menu row: icon, two-colour bar, title, value, chevron.
- *        The returned value label can be updated with setValue().
- */
-RowRefs menuRow(lv_obj_t *parent, const void *icon, const char *title,
-                const char *value, lv_event_cb_t cb, void *user_data);
-
-/**
  * @brief Plain label/value row used on sub-pages.
  */
 RowRefs infoRow(lv_obj_t *parent, const char *label, const char *value);
@@ -100,6 +93,18 @@ void styleDropdown(lv_obj_t *dd);
 
 void setValue(lv_obj_t *label, const char *text);
 void setText(lv_obj_t *label, const char *text);       /* only if changed */
+
+/**
+ * @brief Single-line text that is manually truncated with "..." when it does
+ *        not fit into `maxW` pixels.
+ *
+ * LVGL's LV_LABEL_LONG_DOT only truncates reliably once a fixed width has been
+ * applied; labels that get their width from a flex layout can still wrap and
+ * spill out of their row (a long SSID such as "Chappie2-sasfl" was split at
+ * the hyphen). Measuring with the real font and truncating here keeps every
+ * name on one line regardless of hyphens, underscores or long words.
+ */
+void setEllipsis(lv_obj_t *label, const char *text, lv_coord_t maxW);
 void setVisible(lv_obj_t *obj, bool visible);
 void setSwitch(lv_obj_t *sw, bool on);
 void setDanger(lv_obj_t *label, bool danger);
