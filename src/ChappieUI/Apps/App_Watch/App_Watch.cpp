@@ -38,7 +38,7 @@ static void _watch_time_update(lv_timer_t * timer)
         snprintf(label_buffer, 4, "%02d", (int16_t)device->Env.getTemperature() - 6);
         lv_label_set_text(TemperLabel,label_buffer);        
     }else if (_WatchPad_Current == 1) {
-        snprintf(label_buffer, 10, "%d:%02d", rtc_time.hours, rtc_time.minutes);
+        snprintf(label_buffer, 10, "%02d:%02d", rtc_time.hours, rtc_time.minutes);
         lv_label_set_text(ui_WatchWarmaLabel, label_buffer);
     }
      

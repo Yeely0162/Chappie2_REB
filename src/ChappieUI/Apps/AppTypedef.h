@@ -35,6 +35,13 @@ namespace App {
         void (*getBsp)(void* bsp);
     };
 
+    /**
+     * @brief Optional per-app handler for the hardware B key.
+     * Implemented by the launcher; return true when the press was consumed.
+     */
+    typedef bool (*AppBackHandlerFn)();
+    void SetAppBackHandler(AppBackHandlerFn handler);
+
 }
 
 

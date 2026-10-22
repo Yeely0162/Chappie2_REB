@@ -133,7 +133,7 @@ void Time_update(lv_timer_t * timer){
     static I2C_BM8563_TimeTypeDef rtc_time;
     device->Rtc.getTime(&rtc_time);
     static char label_buffer[10];
-    snprintf(label_buffer, 10, "%d:%02d", rtc_time.hours, rtc_time.minutes);
+    snprintf(label_buffer, 10, "%02d:%02d", rtc_time.hours, rtc_time.minutes);
     lv_label_set_text(timelabel,label_buffer);
 
     
