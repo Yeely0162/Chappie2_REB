@@ -66,12 +66,24 @@ class ChappieIMU : public MPU6050 {
         /**
          * @brief Get the Euler angles in degrees
          * 
-         * @param yaw 
-         * @param pitch 
-         * @param roll 
-         * @return uint8_t 0 when the read path ran, 1 when the IMU is not ready
+         * @param yaw
+         * @param pitch
+         * @param roll
+         * @param gravityX optional: DMP gravity vector X in the sensor frame
+         * @param gravityY optional: DMP gravity vector Y in the sensor frame
+         * @param gravityZ optional: DMP gravity vector Z in the sensor frame
+         * @return uint8_t 0 when a new packet was read, 1 when the IMU is not
+         *                 ready, 2 when no new FIFO packet is available
+         *
+         * Gravity is the world-up direction expressed in the MPU sensor
+         * frame (about (0,0,1) when the sensor is level).  It is more useful
+         * than the Euler angles for tilt compensation because it avoids
+         * pitch/roll ordering and wrap-around issues.
          */
-        inline uint8_t getYawPitchRoll(float& yaw, float& pitch, float& roll)
+        inline uint8_t getYawPitchRoll(float& yaw, float& pitch, float& roll,
+                                       float* gravityX = nullptr,
+                                       float* gravityY = nullptr,
+                                       float* gravityZ = nullptr)
         {
             if (!_ready)
                 return 1;
@@ -84,8 +96,12 @@ class ChappieIMU : public MPU6050 {
                 yaw = _ypr[0] * 180 / M_PI;
                 pitch = _ypr[1] * 180 / M_PI;
                 roll = _ypr[2] * 180 / M_PI;
+                if (gravityX != nullptr) *gravityX = _gravity.x;
+                if (gravityY != nullptr) *gravityY = _gravity.y;
+                if (gravityZ != nullptr) *gravityZ = _gravity.z;
+                return 0;
             }
-            return 0;
+            return 2;
         }
 
 

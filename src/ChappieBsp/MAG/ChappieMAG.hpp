@@ -45,6 +45,13 @@ class ChappieMAG {
             STATUS_ERROR,       /* ACK but chip id / trim / mode failed */
         };
 
+        enum ReadStatus : uint8_t {
+            READ_OK = 0,
+            READ_NOT_READY,
+            READ_I2C_ERROR,
+            READ_OVERFLOW,
+        };
+
         ChappieMAG() : _wire(NULL), _dev_addr(MAG_DEV_ADDR), _status(STATUS_NOT_INIT) {}
         ~ChappieMAG() {}
 
@@ -133,27 +140,50 @@ class ChappieMAG {
             x = 0.0f;
             y = 0.0f;
             z = 0.0f;
+            _lastReadStatus = READ_NOT_READY;
+            _rawX = 0;
+            _rawY = 0;
+            _rawZ = 0;
+            _rawHall = 0;
 
             if ((_status != STATUS_READY) || (_wire == NULL))
                 return false;
 
             uint8_t buff[8];
-            if (!_I2C_readBuff(MAG_REG_DATA_X_LSB, 8, buff))
+            if (!_I2C_readBuff(MAG_REG_DATA_X_LSB, 8, buff)) {
+                _lastReadStatus = READ_I2C_ERROR;
                 return false;
+            }
 
-            /* Bosch layout: low 5/7 bits live in the MSBs of the LSB byte */
-            int16_t raw_x = (int16_t)((int16_t)((int8_t)buff[1]) * 32) | (int16_t)(buff[0] & 0xF8);
-            int16_t raw_y = (int16_t)((int16_t)((int8_t)buff[3]) * 32) | (int16_t)(buff[2] & 0xF8);
-            int16_t raw_z = (int16_t)((int16_t)((int8_t)buff[5]) * 128) | (int16_t)(buff[4] & 0xFE);
-            uint16_t rhall = (uint16_t)(((uint16_t)buff[7] << 6) | (buff[6] & 0xFC));
+            /* BMM150 data layout:
+             *   X/Y are signed 13-bit: MSB[7:0] << 5 | LSB[7:3]
+             *   Z   is signed 15-bit: MSB[7:0] << 7 | LSB[7:1]
+             *   RHALL is unsigned 14-bit: MSB[7:0] << 6 | LSB[7:2]
+             * The LSB fields must be shifted right; keeping them at their
+             * original bit positions (the previous implementation) multiplied
+             * the low bits by 8 (X/Y), 2 (Z) and 4 (RHALL), which corrupted
+             * both the compensated field and the calibration data. */
+            int16_t raw_x = (int16_t)((int16_t)((int8_t)buff[1]) * 32 + (int16_t)(buff[0] >> 3));
+            int16_t raw_y = (int16_t)((int16_t)((int8_t)buff[3]) * 32 + (int16_t)(buff[2] >> 3));
+            int16_t raw_z = (int16_t)((int16_t)((int8_t)buff[5]) * 128 + (int16_t)(buff[4] >> 1));
+            uint16_t rhall = (uint16_t)(((uint16_t)buff[7] << 6) |
+                                        (uint16_t)(buff[6] >> 2));
 
-            /* Overflow / hall resistance flip means the sample is not usable */
-            if ((raw_x == -4096) || (raw_y == -4096) || (raw_z == -16384))
+            _rawX = raw_x;
+            _rawY = raw_y;
+            _rawZ = raw_z;
+            _rawHall = rhall;
+
+            /* Overflow / hall-resistance failure means the sample is not usable */
+            if ((raw_x == -4096) || (raw_y == -4096) || (raw_z == -16384) || (rhall == 0)) {
+                _lastReadStatus = READ_OVERFLOW;
                 return false;
+            }
 
             x = _compensateX(raw_x, rhall);
             y = _compensateY(raw_y, rhall);
             z = _compensateZ(raw_z, rhall);
+            _lastReadStatus = READ_OK;
             return true;
         }
 
@@ -173,6 +203,24 @@ class ChappieMAG {
         inline bool isReady() const { return _status == STATUS_READY; }
         inline uint8_t address() const { return _dev_addr; }
         inline Status status() const { return _status; }
+        inline ReadStatus lastReadStatus() const { return _lastReadStatus; }
+
+        /* Raw values are kept for diagnostics even when a sample overflows. */
+        inline int16_t rawX() const { return _rawX; }
+        inline int16_t rawY() const { return _rawY; }
+        inline int16_t rawZ() const { return _rawZ; }
+        inline uint16_t rawHall() const { return _rawHall; }
+
+        static inline const char* readStatusText(ReadStatus status)
+        {
+            switch (status) {
+                case READ_OK:         return "OK";
+                case READ_NOT_READY:  return "Not ready";
+                case READ_I2C_ERROR:  return "I2C error";
+                case READ_OVERFLOW:   return "Overflow/saturation";
+                default:              return "Unknown";
+            }
+        }
 
         static inline const char* statusText(Status status)
         {
@@ -188,6 +236,11 @@ class ChappieMAG {
         TwoWire* _wire;
         uint8_t _dev_addr;
         Status _status;
+        ReadStatus _lastReadStatus = READ_NOT_READY;
+        int16_t _rawX = 0;
+        int16_t _rawY = 0;
+        int16_t _rawZ = 0;
+        uint16_t _rawHall = 0;
 
         /* Trim data */
         int8_t   _digX1 = 0;
@@ -265,13 +318,15 @@ class ChappieMAG {
             if (!_I2C_read8Bit(MAG_REG_OP_MODE, reg))
                 return false;
 
-            /* ODR 10Hz, XY repetition 4, Z repetition 7 (regular preset) */
+            /* Bosch "regular preset", ODR 10 Hz:
+             *   nXY = 1 + 2*REP_XY  -> REP_XY = 4  (9 repetitions)
+             *   nZ  = 1 +    REP_Z  -> REP_Z  = 14 (15 repetitions) */
             reg = (uint8_t)(reg & ~0x38);
             if (!_I2C_write1Byte(MAG_REG_OP_MODE, reg))
                 return false;
             if (!_I2C_write1Byte(MAG_REG_REP_XY, 0x04))
                 return false;
-            if (!_I2C_write1Byte(MAG_REG_REP_Z, 0x07))
+            if (!_I2C_write1Byte(MAG_REG_REP_Z, 0x0E))
                 return false;
 
             /* Normal mode, write op-mode bits [2:1] last */

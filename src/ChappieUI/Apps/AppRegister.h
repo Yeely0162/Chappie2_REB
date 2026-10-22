@@ -47,6 +47,7 @@
 #include "App_ChatGPT/App_ChatGPT.h"
 #include "App_EvilAppleJuice/App_EAJ.h"
 #include "App_ClaudeBuddy/App_ClaudeBuddy.h"
+#include "App_Compass/App_Compass.h"
 /* Header files locator */
 /* Don't remove this, or python script's auto login will be failed */
 
@@ -64,6 +65,7 @@ namespace App {
 		App_Login(EAJ),
 		App_Login(Noiser),
 		App_Login(LEDS),
+		App_Login(Compass),
 		App_Login(Synology),
 		App_Login(ChatGPT),
 		App_Login(StupidSnake),
@@ -73,8 +75,8 @@ namespace App {
 		App_Login(WifiTV),
 		App_Login(Gamepad),
 		App_Login(Settings),
-		App_Login(ClaudeBuddy),
 		
+
 		/* Login locator */
         /* Don't remove this, or python script's auto login will be failed */
 
