@@ -20,12 +20,16 @@ class ChappieLvgl {
         bool _enable;
         TaskHandle_t _task_handler;
         SemaphoreHandle_t _semaphore_mutex;
+        /* Held for the whole lv_timer_handler() call. disable() waits on it so
+         * the main task never mutates the object tree while the LVGL task is
+         * drawing. */
+        SemaphoreHandle_t _api_mutex;
         bool _task_inited;
 
         /**
          * @brief Task to handle lvgl timer
-         * 
-         * @param param 
+         *
+         * @param param
          */
         static void task_lv_timer_handler(void* param)
         {
@@ -33,14 +37,21 @@ class ChappieLvgl {
             while (1)
             {
                 if (lvgl->isEnable())
-                    lv_timer_handler();
+                {
+                    xSemaphoreTake(lvgl->_api_mutex, portMAX_DELAY);
+                    if (lvgl->isEnable())
+                        lv_timer_handler();
+                    xSemaphoreGive(lvgl->_api_mutex);
+                }
                 delay(5);
             }
             vTaskDelete(NULL);
         }
 
     public:
-        inline ChappieLvgl() : _task_inited(false) {}
+        inline ChappieLvgl()
+            : _enable(false), _task_handler(nullptr), _semaphore_mutex(nullptr),
+              _api_mutex(nullptr), _task_inited(false) {}
 
         /**
          * @brief Init lvgl and create a task to handle lv timer
@@ -59,6 +70,7 @@ class ChappieLvgl {
             if (!_task_inited) {
                 _task_inited = true;
                 _semaphore_mutex = xSemaphoreCreateMutex();
+                _api_mutex = xSemaphoreCreateMutex();
                 _enable = false;
                 xTaskCreate(task_lv_timer_handler, "lvgl", 5000, this, 5, &_task_handler);
             }
@@ -87,9 +99,21 @@ class ChappieLvgl {
         {
             if (!_enable)
                 return;
+
+            /* Never call from an LVGL callback: that would deadlock on the
+             * handler mutex we already hold. */
+            if (_api_mutex && (xSemaphoreGetMutexHolder(_api_mutex) == xTaskGetCurrentTaskHandle()))
+                return;
+
             xSemaphoreTake(_semaphore_mutex, xTicksToWait);
             _enable = false;
             xSemaphoreGive(_semaphore_mutex);
+
+            /* Wait for a handler that is already running to finish. */
+            if (_api_mutex) {
+                xSemaphoreTake(_api_mutex, xTicksToWait);
+                xSemaphoreGive(_api_mutex);
+            }
         }
 
         /**

@@ -26,9 +26,14 @@ uint16_t AXP173::_getMid(uint16_t input, uint16_t min, uint16_t max) {
  * @return false Init successful
  */
 bool AXP173::begin() {
-    /* CHAPPIE::init() owns the I2C bus; do not call Wire.begin() again. */
-    // Wire.beginTransmission(0x34);
-    // return Wire.endTransmission() ? true : false;
+    /* CHAPPIE::init() owns the I2C bus; do not call Wire.begin() again.
+     * Probe a status register instead of assuming the chip answered. */
+    _ioOk = true;
+    (void)read8Bit(0x00);
+    if (!_ioOk) {
+        printf("[AXP] no response at 0x34\n");
+        return false;
+    }
     return true;
 }
 #else
@@ -215,6 +220,39 @@ float AXP173::getBatDisCurrent(){
     float ADCLSB = 0.5;
     return (uint16_t) read24Bit(0x7C) * ADCLSB;
 }
+
+/**
+ * @brief Charge current (0x7A) in mA. The AXP173 exposes charge and discharge
+ *        current in two separate 13-bit registers; do not subtract them.
+ */
+float AXP173::getBatChargeCurrentMA() {
+    return read13Bit(0x7A) * 0.5f;
+}
+
+float AXP173::getBatDischargeCurrentMA() {
+    return read13Bit(0x7C) * 0.5f;
+}
+
+float AXP173::getBatCurrentSignedMA() {
+    return isCharging() ? getBatChargeCurrentMA() : -getBatDischargeCurrentMA();
+}
+
+uint8_t AXP173::getChargeCurrentCode() {
+    return read8Bit(0x33) & 0x0F;
+}
+
+float AXP173::getChargeCurrentMA() {
+    static const uint16_t table[16] = {
+        100, 190, 280, 360, 450, 550, 630, 700,
+        780, 880, 960, 1000, 1080, 1160, 1240, 1320,
+    };
+    return table[getChargeCurrentCode() & 0x0F];
+}
+
+float AXP173::getChargeVoltageSettingV() {
+    static const float table[4] = {4.10f, 4.15f, 4.20f, 4.36f};
+    return table[(read8Bit(0x33) >> 4) & 0x03];
+}
 float AXP173::getBatLevel() {
     const float batVoltage = getBatVoltage();
     const float batPercentage = (batVoltage < 3.248088) ? (0) : (batVoltage - 3.120712) * 100;       
@@ -262,7 +300,8 @@ void AXP173::write1Byte(uint8_t addr, uint8_t data) {
     Wire.beginTransmission(0x34);
     Wire.write(addr);
     Wire.write(data);
-    if (Wire.endTransmission() != 0)
+    _ioOk = (Wire.endTransmission() == 0);
+    if (!_ioOk)
         printf("[AXP] write 0x%02X failed\n", (unsigned)addr);
 }
 
@@ -272,15 +311,22 @@ uint8_t AXP173::read8Bit(uint8_t addr) {
     Wire.beginTransmission(0x34);
     Wire.write(addr);
     if (Wire.endTransmission() != 0) {
+        _ioOk = false;
         printf("[AXP] read 0x%02X failed: write\n", (unsigned)addr);
         return 0;
     }
     if (Wire.requestFrom(0x34, (size_t)1) != (size_t)1) {
+        _ioOk = false;
         printf("[AXP] read 0x%02X failed: read\n", (unsigned)addr);
         return 0;
     }
     int data = Wire.read();
-    return (data < 0) ? 0 : (uint8_t)data;
+    if (data < 0) {
+        _ioOk = false;
+        return 0;
+    }
+    _ioOk = true;
+    return (uint8_t)data;
 }
 
 uint16_t AXP173::read12Bit(uint8_t addr) {
@@ -322,17 +368,22 @@ void AXP173::readBuff(uint8_t addr, int size, uint8_t buff[]) {
     Wire.beginTransmission(0x34);
     Wire.write(addr);
     if (Wire.endTransmission() != 0) {
+        _ioOk = false;
         printf("[AXP] read 0x%02X failed: write\n", (unsigned)addr);
         return;
     }
     if (Wire.requestFrom(0x34, (size_t)size) != (size_t)size) {
+        _ioOk = false;
         printf("[AXP] read 0x%02X failed: read\n", (unsigned)addr);
         return;
     }
+    _ioOk = true;
     for (int i = 0; i < size; i++) {
         int data = Wire.read();
-        if (data < 0)
+        if (data < 0) {
+            _ioOk = false;
             break;
+        }
         buff[i] = (uint8_t)data;
     }
 }

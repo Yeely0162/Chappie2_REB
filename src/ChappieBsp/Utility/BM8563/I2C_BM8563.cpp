@@ -9,12 +9,38 @@ I2C_BM8563::I2C_BM8563(uint8_t deviceAddress, TwoWire &i2cPort) {
 void I2C_BM8563::begin(void) {
   ChappieI2CGuard lock;
 
+  /* Only the two control registers are touched here: the first byte is the
+   * register pointer, the two following bytes are written to 0x00 and 0x01.
+   *
+   *   0x00  Control_1  - clear STOP (start the oscillator), keep TEST off
+   *   0x01  Control_2  - clear the alarm/timer interrupt enables
+   *
+   * The time registers (0x02 onwards) are deliberately left untouched: an
+   * init path that writes them would reset the running clock at every boot. */
   _i2cPort->beginTransmission(_deviceAddress);
   _i2cPort->write(0x00);
   _i2cPort->write(0x00);
   _i2cPort->write(0x00);
-  if (_i2cPort->endTransmission() != 0)
+  if (_i2cPort->endTransmission() != 0) {
     printf("[RTC] begin write failed\n");
+    return;
+  }
+
+  /* Read the control register back: bit 5 is STOP. A set bit means the
+   * oscillator is halted and the time would look frozen to the UI. */
+  _i2cPort->beginTransmission(_deviceAddress);
+  _i2cPort->write(0x00);
+  if (_i2cPort->endTransmission(false) != 0) {
+    printf("[RTC] begin verify: write failed\n");
+    return;
+  }
+  if (_i2cPort->requestFrom(_deviceAddress, 1) != 1) {
+    printf("[RTC] begin verify: read failed\n");
+    return;
+  }
+  const uint8_t control1 = (uint8_t)_i2cPort->read();
+  if (control1 & 0x20)
+    printf("[RTC] begin: clock still stopped (control1=0x%02X)\n", (unsigned)control1);
 }
 
 bool I2C_BM8563::getVoltLow() {
@@ -39,7 +65,10 @@ uint8_t I2C_BM8563::byteToBcd2(uint8_t value) {
   return ((uint8_t)(bcdhigh << 4) | value);
 }
 
-void I2C_BM8563::getTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct) {
+bool I2C_BM8563::getTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct) {
+  if (I2C_BM8563_TimeStruct == NULL)
+    return false;
+
   ChappieI2CGuard lock;
   uint8_t buf[3] = {0};
 
@@ -47,23 +76,26 @@ void I2C_BM8563::getTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct) {
   _i2cPort->write(0x02);
   if (_i2cPort->endTransmission(false) != 0) {
     printf("[RTC] getTime write failed\n");
-    return;
+    return false;
   }
   if (_i2cPort->requestFrom(_deviceAddress, 3) != 3) {
     printf("[RTC] getTime read failed\n");
-    return;
+    return false;
   }
   if (_i2cPort->available() < 3) {
     printf("[RTC] getTime short read\n");
-    return;
+    return false;
   }
   buf[0] = _i2cPort->read();
   buf[1] = _i2cPort->read();
   buf[2] = _i2cPort->read();
 
+  /* Mask only the BCD flag bits. The values are range-checked by the UI;
+   * 00:00:00 from a never-set RTC is a valid reading. */
   I2C_BM8563_TimeStruct->seconds = bcd2ToByte(buf[0] & 0x7f);
   I2C_BM8563_TimeStruct->minutes = bcd2ToByte(buf[1] & 0x7f);
   I2C_BM8563_TimeStruct->hours   = bcd2ToByte(buf[2] & 0x3f);
+  return true;
 }
 
 void I2C_BM8563::setTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct) {
@@ -82,7 +114,10 @@ void I2C_BM8563::setTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct) {
     printf("[RTC] setTime failed\n");
 }
 
-void I2C_BM8563::getDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {
+bool I2C_BM8563::getDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {
+  if (I2C_BM8563_DateStruct == NULL)
+    return false;
+
   ChappieI2CGuard lock;
   uint8_t buf[4] = {0};
 
@@ -90,15 +125,15 @@ void I2C_BM8563::getDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {
   _i2cPort->write(0x05);
   if (_i2cPort->endTransmission(false) != 0) {
     printf("[RTC] getDate write failed\n");
-    return;
+    return false;
   }
   if (_i2cPort->requestFrom(_deviceAddress, 4) != 4) {
     printf("[RTC] getDate read failed\n");
-    return;
+    return false;
   }
   if (_i2cPort->available() < 4) {
     printf("[RTC] getDate short read\n");
-    return;
+    return false;
   }
   buf[0] = _i2cPort->read();
   buf[1] = _i2cPort->read();
@@ -114,6 +149,7 @@ void I2C_BM8563::getDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {
   } else {
     I2C_BM8563_DateStruct->year = 2000 + bcd2ToByte(buf[3] & 0xff);
   }
+  return true;
 }
 
 void I2C_BM8563::setDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct) {

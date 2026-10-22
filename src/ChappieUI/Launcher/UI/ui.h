@@ -33,6 +33,7 @@ extern lv_obj_t * ui_LabelStateBarTime;
 extern lv_obj_t * ui_ImgBattery;
 extern lv_obj_t * ui_BatteryBar;
 extern lv_obj_t * ui_WifiBar;
+extern lv_obj_t * ui_BtBar;
 extern lv_obj_t * ui_BatteryLabel;
 extern lv_obj_t * ui_CharingFlash;
 

@@ -349,5 +349,24 @@ class ChappieCTP {
 
         inline void enable() { _enable = true; }
         inline void disable() { _enable = false; }
+
+        /**
+         * @brief Re-arm the controller after light sleep. The launcher resets
+         *        GPIO21 for wake-on-low-level, which also drops the ISR and the
+         *        pull-up; this restores both without a full blocking init.
+         */
+        inline void resume()
+        {
+            detachInterrupt(digitalPinToInterrupt(CTP_INT_PIN));
+            pinMode(CTP_INT_PIN, INPUT_PULLUP);
+            attachInterruptArg(digitalPinToInterrupt(CTP_INT_PIN), _touch_isr, this, FALLING);
+            _reset_coor();
+            _irq_flag = false;
+            _was_touched = false;
+            _last_touch_ms = 0;
+            _wake_start_ms = 0;
+            _I2C_write1Byte(0xFE, 0x07);
+            _enable = true;
+        }
 };
 

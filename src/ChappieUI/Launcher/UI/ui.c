@@ -30,6 +30,7 @@ lv_obj_t * ui_ImgBattery;
 lv_obj_t * ui_BatteryBar;
 lv_obj_t * ui_BatteryLabel;
 lv_obj_t * ui_WifiBar;
+lv_obj_t * ui_BtBar;
 lv_obj_t * ui_CharingFlash;
 
 ///////////////////// TEST LVGL SETTINGS ////////////////////
@@ -286,14 +287,16 @@ void ui_ScreenLauncher_screen_init(void)
     lv_img_set_src(ui_ImgBattery, &ui_img_img_battery_png);
     lv_obj_set_width(ui_ImgBattery, LV_SIZE_CONTENT);   /// 32
     lv_obj_set_height(ui_ImgBattery, LV_SIZE_CONTENT);    /// 27
-    lv_obj_set_x(ui_ImgBattery, 80);
+    /* Right-side status cluster, ordered Wi-Fi -> Bluetooth -> battery.
+     * All children are center-aligned so the 280x30 bar stays symmetric. */
+    lv_obj_set_x(ui_ImgBattery, 114);
     lv_obj_set_y(ui_ImgBattery, -1);
     lv_obj_set_align(ui_ImgBattery, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_ImgBattery, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_ImgBattery, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     //WiFi UI
     ui_WifiBar = Create_Bar_LabelOrIcon(ui_ImgStateBar,ui_WifiBar,LV_SYMBOL_WIFI);
-    lv_obj_set_x(ui_WifiBar, 50);
+    lv_obj_set_x(ui_WifiBar, 48);
     lv_obj_set_y(ui_WifiBar, -1);
     lv_obj_set_align(ui_WifiBar, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_WifiBar, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
@@ -302,12 +305,24 @@ void ui_ScreenLauncher_screen_init(void)
     lv_obj_set_style_text_color(ui_WifiBar, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(ui_WifiBar, LV_OBJ_FLAG_HIDDEN); // hide flag
 
-    //Charing Flash
+    //Bluetooth UI (between Wi-Fi and battery)
+    ui_BtBar = Create_Bar_LabelOrIcon(ui_ImgStateBar,ui_BtBar,LV_SYMBOL_BLUETOOTH);
+    lv_obj_set_x(ui_BtBar, 66);
+    lv_obj_set_y(ui_BtBar, -1);
+    lv_obj_set_align(ui_BtBar, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_BtBar, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
+    lv_obj_clear_flag(ui_BtBar, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_text_font(ui_BtBar, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(ui_BtBar, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_add_flag(ui_BtBar, LV_OBJ_FLAG_HIDDEN); // hide flag
+
+    /* Kept for resource compatibility; the charging state is shown by
+     * swapping the battery icon image instead of stacking icons. */
     ui_CharingFlash = lv_img_create(ui_ImgStateBar);
     lv_img_set_src(ui_CharingFlash, &ui_img_img_Charing_png);
     lv_obj_set_width(ui_CharingFlash, LV_SIZE_CONTENT);   /// 32
     lv_obj_set_height(ui_CharingFlash, LV_SIZE_CONTENT);    /// 27
-    lv_obj_set_x(ui_CharingFlash, 80);
+    lv_obj_set_x(ui_CharingFlash, 114);
     lv_obj_set_y(ui_CharingFlash, -1);
     lv_obj_set_align(ui_CharingFlash, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_CharingFlash, LV_OBJ_FLAG_HIDDEN); // hide flag
@@ -315,14 +330,13 @@ void ui_ScreenLauncher_screen_init(void)
 
     //Battery Label
     ui_BatteryLabel = Create_Bar_LabelOrIcon(ui_ImgStateBar,ui_BatteryLabel,"100");
-    lv_obj_set_x(ui_BatteryLabel, 105);
+    lv_obj_set_x(ui_BatteryLabel, 86);
     lv_obj_set_align(ui_BatteryLabel, LV_ALIGN_CENTER);
-    // lv_obj_add_flag(ui_WifiBar, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
-    // lv_obj_clear_flag(ui_WifiBar, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_text_font(ui_BatteryLabel, &ui_font_FontUbuntuBold16, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(ui_BatteryLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_BatteryBar = lv_bar_create(ui_ImgBattery);
+    lv_bar_set_range(ui_BatteryBar, 0, 100);
     lv_bar_set_value(ui_BatteryBar, 100, LV_ANIM_OFF);
     lv_obj_set_width(ui_BatteryBar, 17);
     lv_obj_set_height(ui_BatteryBar, 9);
@@ -347,10 +361,16 @@ lv_obj_t * Create_Bar_LabelOrIcon(lv_obj_t * obj, lv_obj_t * targetObj,const cha
 }
 void ui_init(void)
 {
-    lv_disp_t * dispp = lv_disp_get_default();
-    lv_theme_t * theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED),
-                                               false, LV_FONT_DEFAULT);
-    lv_disp_set_theme(dispp, theme);
+    /* The launcher is rebuilt every time an app exits. Creating a new theme
+     * on each build leaks heap, so install it once. */
+    static bool theme_ready = false;
+    if (!theme_ready) {
+        lv_disp_t * dispp = lv_disp_get_default();
+        lv_theme_t * theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED),
+                                                   false, LV_FONT_DEFAULT);
+        lv_disp_set_theme(dispp, theme);
+        theme_ready = true;
+    }
     ui_ScreenLauncher_screen_init();
     // lv_disp_load_scr(ui_ScreenLauncher);
 }

@@ -13,6 +13,7 @@
 #include "Utility/ChappieI2C.hpp"
 #define DEBUG_CPU 1
 #include "esp32s3/rom/rtc.h"
+#include <esp_sleep.h>
 
 StaticSemaphore_t g_chappie_i2c_mutex_buffer;
 SemaphoreHandle_t g_chappie_i2c_mutex = NULL;
@@ -119,10 +120,10 @@ void CHAPPIE::init()
     Lcd.printf("%s", Cowsay("Pls touch screen to wakeup Tp").c_str());
     I2C_Scan();
     Lcd.printf(Tp.isReady() ? "Tp init success!\n" : "Tp init failed\n");
-    Wf.Init();
-    Ble.Init();
-    /* Init RTC */
+    /* Init RTC before the network layer: NTP writes through the same instance */
     Rtc.begin();
+    Wf.Init(&Rtc);
+    Ble.Init();
     /* Init IMU */
     Imu.init();
     /* Init SD card */
@@ -146,4 +147,43 @@ void CHAPPIE::init()
     #endif
     //Resource Init
     ResourcePool::Init();
+
+    /* Take a first battery snapshot so the UI never shows a zero gauge. */
+    Pow.update(true);
+}
+
+void CHAPPIE::update()
+{
+    /* All long-running services run here, in the Arduino loop task. LVGL
+     * callbacks only post requests into these objects. */
+    Pow.update();
+    Wf.update();
+    Ble.update();
+}
+
+void CHAPPIE::shutdown()
+{
+    printf("[SYS] shutdown requested\n");
+
+    lvgl.disable();
+
+    /* Stop network activity before cutting rails. */
+    Wf.shutdown();
+    Ble.disable();
+
+    /* Park outputs in their safe state. */
+    Vibrator.stop();
+    FastLED.showColor(CRGB::Black);
+    Lcd.setBrightness(0);
+
+    Vibrator.Buzzzzz(180);
+    delay(200);
+
+    /* Ask the AXP173 to remove the system rails. */
+    Pow.powerOff();
+
+    /* If the PMIC did not cut power (board dependent), fall back to the
+     * lowest-power software state instead of pretending the device is off. */
+    printf("[SYS] PMIC did not cut power, entering deep sleep\n");
+    esp_deep_sleep_start();
 }

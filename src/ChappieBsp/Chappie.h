@@ -78,5 +78,18 @@ class CHAPPIE : public EMMA {
         }
 
         void init();
-    
+
+        /**
+         * @brief Run the system services that must execute in the Arduino
+         *        loop task: battery sampling, Wi-Fi state machine, BLE requests
+         *        and NTP polling.
+         */
+        void update();
+
+        /**
+         * @brief Stop network/BLE activity and ask the PMIC to cut power.
+         *        Falls back to deep sleep if the AXP173 does not cut the rail.
+         */
+        void shutdown();
+
 };

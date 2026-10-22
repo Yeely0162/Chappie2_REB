@@ -20,6 +20,7 @@ class AXP173 {
         uint32_t read24Bit(uint8_t addr);
         uint32_t read32Bit(uint8_t addr);
         void     readBuff(uint8_t addr, int size, uint8_t buff[]);
+        volatile bool _ioOk = true;
     public:
         enum OUTPUT_CHANNEL {
             OP_DCDC1    = 0,
@@ -97,8 +98,19 @@ class AXP173 {
         float getBatVoltage();
         float getBatCurrent();
         float getBatDisCurrent();//BatDischargeCurrent
+        float getBatChargeCurrentMA();     /* 13-bit charge current register 0x7A */
+        float getBatDischargeCurrentMA();  /* 13-bit discharge current register 0x7C */
+        float getBatCurrentSignedMA();     /* positive while charging */
         float getBatLevel();
         float getBatPower();
+
+        /* Charge configuration readback (AXP173 register 0x33) */
+        uint8_t getChargeCurrentCode();
+        float getChargeCurrentMA();
+        float getChargeVoltageSettingV();
+
+        /* True when the last I2C transaction succeeded. */
+        bool lastIoOk() const { return _ioOk; }
         /* VBUS data */
         float getVBUSVoltage();
         float getVBUSCurrent();

@@ -27,8 +27,22 @@ class I2C_BM8563 {
     void begin(void);
     bool getVoltLow();
 
-    void getTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct);
-    void getDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct);
+    /**
+     * @brief Read the RTC time.
+     *
+     * @return true when the I2C transfer succeeded and the structure was
+     *         filled. A never-configured RTC legitimately returns 00:00:00;
+     *         that is a valid reading, not I2C failure.
+     */
+    bool getTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct);
+
+    /**
+     * @brief Read the RTC date. Returns false only on an I2C failure.
+     *
+     * An unset RTC can return month/day 0. Callers must not use the date as a
+     * validity gate for the time.
+     */
+    bool getDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct);
 
     void setTime(I2C_BM8563_TimeTypeDef* I2C_BM8563_TimeStruct);
     void setDate(I2C_BM8563_DateTypeDef* I2C_BM8563_DateStruct);
