@@ -21,13 +21,6 @@ static BackHandler g_back = nullptr;
 
 static const char *WEEK[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
-static void back_cb(lv_event_t *e)
-{
-    (void)e;
-    if (g_back)
-        g_back();
-}
-
 /* ========================================================================= */
 /* Module table                                                              */
 /* ========================================================================= */
@@ -107,15 +100,17 @@ static void apply_icon(lv_obj_t *img, const char *name, uint16_t zoom)
 }
 
 /**
- * @brief Sub-page shell.
+ * @brief Sub-page shell: one centred title bar shared by every sub-page.
  *
- * The bar holds a 32x32 back button and nothing else: the module icon and the
- * centred module title live in the module header at the top of the body, so
- * they cannot be confused with the carousel rail and never duplicate it.
+ * The page name is centred on the real screen width (LV_ALIGN_TOP_MID on a
+ * full-width label), exactly like the main menu's "SETTINGS" title. There is
+ * no back button: B is the back key and is handled by handleBack(), which
+ * keeps a single navigation path for both the physical key and the app.
  */
 static lv_obj_t *shell(lv_obj_t *parent, PageId page)
 {
-    (void)page;                         /* icon/title come from moduleHero() */
+    const int index = module_index_for(page);
+    const char *title = index >= 0 ? MODULES[index].title : "Settings";
 
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_set_size(root, SCREEN_W, SCREEN_H);
@@ -137,49 +132,29 @@ static lv_obj_t *shell(lv_obj_t *parent, PageId page)
     lv_obj_set_style_pad_all(hdr, 0, 0);
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* 32x32 hit area, drawn on top of the body separator. */
-    lv_obj_t *back = lv_btn_create(hdr);
-    lv_obj_set_size(back, 32, 32);
-    lv_obj_set_pos(back, 3, 1);
-    lv_obj_set_style_bg_opa(back, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_color(back, ST_PANEL_HI, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(back, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_radius(back, 8, 0);
-    lv_obj_set_style_border_width(back, 0, 0);
-    lv_obj_set_style_shadow_width(back, 0, 0);
-    lv_obj_set_style_pad_all(back, 0, 0);
-    lv_obj_add_event_cb(back, back_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *backIcon = lv_label_create(back);
-    lv_label_set_text(backIcon, LV_SYMBOL_LEFT);
-    lv_obj_set_style_text_color(backIcon, ST_TEXT, 0);
-    lv_obj_set_style_text_font(backIcon, &lv_font_montserrat_18, 0);
-    lv_obj_center(backIcon);
-
-    /* Thin separator between the bar and the page body. */
-    lv_obj_t *line = lv_obj_create(hdr);
-    lv_obj_set_size(line, SCREEN_W, 1);
-    lv_obj_set_pos(line, 0, SUBHEADER_H - 1);
-    lv_obj_set_style_bg_color(line, ST_LINE, 0);
-    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(line, 0, 0);
-    lv_obj_set_style_radius(line, 0, 0);
-    lv_obj_set_style_pad_all(line, 0, 0);
-    lv_obj_clear_flag(line, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *label = lv_label_create(hdr);
+    lv_obj_set_size(label, SCREEN_W, 24);
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 5);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(label, ST_TEXT, 0);
+    lv_obj_set_style_text_font(label, fontTitle(), 0);
+    lv_obj_set_style_text_letter_space(label, 1, 0);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_label_set_text(label, title);
 
     return root;
 }
 
 /**
  * @brief Module header for a sub-page, resolved from the shared module table
- *        so the icon can never drift from the carousel.
+ *        so the icon can never drift from the carousel. The title is shown in
+ *        the top bar, so the header only carries the icon and the rows.
  */
 static STheme::ModuleHero hero_for(lv_obj_t *page, PageId id, int rowCount)
 {
     const int index = module_index_for(id);
     const void *icon = index >= 0 ? module_icon(MODULES[index].icon) : nullptr;
-    const char *title = index >= 0 ? MODULES[index].title : "Settings";
-    return STheme::moduleHero(page, icon, title, rowCount);
+    return STheme::moduleHero(page, icon, nullptr, rowCount);
 }
 
 static void set_text_buf(lv_obj_t *label, const char *fmt, ...)
@@ -371,6 +346,9 @@ static lv_anim_t g_carAnim;
 static int g_carSel = 0;
 static int g_carFrom = 0;
 static int g_carDir = 0;
+/* One step requested while a transition is still running; started when the
+ * current animation finishes so old and new state never fight. */
+static int g_carPendingDir = 0;
 /* Survives the root page being rebuilt, so returning from a sub-page restores
  * the module the user was on. */
 static int g_carHomeIndex = 0;
@@ -379,6 +357,7 @@ static int32_t g_carRailTo = 0;
 static bool g_carAnimating = false;
 
 static void car_refresh_all();
+static void car_step(int dir);
 
 /** Wrap a carousel index around the module table. */
 static int car_wrap(int index)
@@ -388,12 +367,48 @@ static int car_wrap(int index)
     return index % MODULE_COUNT;
 }
 
+/*
+ * Row fade.
+ *
+ * Whole-object opacity (lv_obj_set_style_opa) makes LVGL 8 render the object
+ * through a layer: _lv_obj_get_layer_type() returns LV_LAYER_TYPE_SIMPLE for
+ * any opacity below COVER, and lv_draw_sw_layer_create() refuses alpha layers
+ * unless LV_COLOR_SCREEN_TRANSP is 1. On this build it is 0, so every animated
+ * row logged
+ *     "Rendering this widget needs LV_COLOR_SCREEN_TRANSP 1"
+ *     "Couldn't create a new layer context"
+ * and was skipped for the whole transition - i.e. the carousel appeared to
+ * jump to the next item with no animation.
+ *
+ * Text and image opacity are blended per glyph/pixel by the draw code and do
+ * not need a layer, so the fade is applied to the row's children instead.
+ * The row itself stays fully opaque, which also keeps the effect compatible
+ * with the current LV_COLOR_DEPTH 16 / LV_COLOR_SCREEN_TRANSP 0 configuration.
+ */
+static void car_set_row_opa(int slot, lv_opa_t opa)
+{
+    CarRow &r = g_carRows[slot];
+    if (!r.row)
+        return;
+
+    if (r.icon)
+        lv_obj_set_style_img_opa(r.icon, opa, 0);
+    if (r.title)
+        lv_obj_set_style_text_opa(r.title, opa, 0);
+    for (int i = 0; i < 3; i++) {
+        if (r.field[i])
+            lv_obj_set_style_text_opa(r.field[i], opa, 0);
+        if (r.value[i])
+            lv_obj_set_style_text_opa(r.value[i], opa, 0);
+    }
+}
+
 static void car_set_position(int slot, lv_coord_t y, lv_opa_t opa)
 {
     if (!g_carRows[slot].row)
         return;
     lv_obj_set_y(g_carRows[slot].row, y);
-    lv_obj_set_style_opa(g_carRows[slot].row, opa, 0);
+    car_set_row_opa(slot, opa);
 }
 
 static void car_reset_positions()
@@ -477,13 +492,27 @@ static void car_anim_ready(lv_anim_t *a)
     car_update_rail(0);
     car_update_index_label();
     car_refresh_all();
+
+    /* A swipe that arrived during this transition is played now, from the
+     * fully committed state. */
+    if (g_carPendingDir != 0) {
+        const int next = g_carPendingDir;
+        g_carPendingDir = 0;
+        car_step(next);
+    }
 }
 
 /** Move the selection by one module. dir > 0 = next, dir < 0 = previous. */
 static void car_step(int dir)
 {
-    if (!g_carView || g_carAnimating)
+    if (!g_carView)
         return;
+
+    if (g_carAnimating) {
+        /* Keep only the latest request; it is started by car_anim_ready(). */
+        g_carPendingDir = dir;
+        return;
+    }
 
     g_carDir = dir;
     g_carFrom = g_carSel;
@@ -567,9 +596,9 @@ static int car_slot_at(lv_coord_t y)
 
 static void car_press_cb(lv_event_t *e)
 {
-    if (g_carAnimating)
-        return;
-
+    /* Also recorded while a transition runs, so a quick second swipe can be
+     * queued (see car_step) instead of being swallowed. A tap is still
+     * ignored by car_release_cb while animating. */
     lv_indev_t *indev = car_event_indev(e);
     if (!indev)
         return;
@@ -913,19 +942,23 @@ lv_obj_t *buildRoot(lv_obj_t *parent, CHAPPIE *dev)
     lv_obj_clear_flag(g_carRailFill, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(g_carRailFill, LV_OBJ_FLAG_CLICKABLE);
 
-    /* Position indicator, generated from the real module count. */
+    /* Position indicator. 17 px instead of the 13 px caption font (about
+     * +30%) and in the primary text colour, so it is readable on the 240 px
+     * high panel without touching the carousel geometry (label 22 px high at
+     * y=210, screen ends at 240). */
     g_carIndexLabel = lv_label_create(root);
     lv_obj_set_pos(g_carIndexLabel, 0, HEADER_H + CAR_VIEW_H + 2);
     lv_obj_set_size(g_carIndexLabel, SCREEN_W, 22);
     lv_obj_set_style_text_align(g_carIndexLabel, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(g_carIndexLabel, ST_MUTED, 0);
-    lv_obj_set_style_text_font(g_carIndexLabel, fontSmall(), 0);
-    lv_obj_set_style_text_letter_space(g_carIndexLabel, 2, 0);
+    lv_obj_set_style_text_color(g_carIndexLabel, ST_TEXT, 0);
+    lv_obj_set_style_text_font(g_carIndexLabel, fontValue(), 0);
+    lv_obj_set_style_text_letter_space(g_carIndexLabel, 1, 0);
     lv_label_set_text(g_carIndexLabel, "");
 
     g_carSel = car_wrap(g_carHomeIndex);
     g_carFrom = g_carSel;
     g_carDir = 0;
+    g_carPendingDir = 0;
     g_carRailFrom = g_carSel * 256;
     g_carRailTo = g_carRailFrom;
     g_carAnimating = false;
@@ -2531,6 +2564,7 @@ void destroy()
     g_carSel = 0;
     g_carFrom = 0;
     g_carDir = 0;
+    g_carPendingDir = 0;
     g_carHomeIndex = 0;
     g_carRailFrom = 0;
     g_carRailTo = 0;

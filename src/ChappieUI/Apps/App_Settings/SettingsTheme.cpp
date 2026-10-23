@@ -122,8 +122,9 @@ ModuleHero moduleHero(lv_obj_t *parent, const void *icon, const char *title, int
 {
     ModuleHero hero;
 
-    /* title 24 + pad 2 + rows at 22 px pitch with 2 px gaps */
-    const lv_coord_t h = (lv_coord_t)(28 + rowCount * 24);
+    /* Optional title (24 px + 2 px gap) + rows at a 24 px pitch. */
+    const bool has_title = (title != nullptr && title[0] != '\0');
+    const lv_coord_t h = (lv_coord_t)((has_title ? 28 : 4) + rowCount * 24);
     /* Page body content width (280 - 2 * 8) minus the icon column. */
     const lv_coord_t detail_w = (SCREEN_W - 16) - 64;
 
@@ -167,15 +168,17 @@ ModuleHero moduleHero(lv_obj_t *parent, const void *icon, const char *title, int
     lv_obj_clear_flag(detail, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(detail, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *t = lv_label_create(detail);
-    lv_obj_set_width(t, LV_PCT(100));
-    lv_obj_set_height(t, 24);
-    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(t, ST_TEXT, 0);
-    lv_obj_set_style_text_font(t, fontTitle(), 0);
-    lv_obj_set_style_text_letter_space(t, 1, 0);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-    lv_label_set_text(t, title ? title : "");
+    if (has_title) {
+        lv_obj_t *t = lv_label_create(detail);
+        lv_obj_set_width(t, LV_PCT(100));
+        lv_obj_set_height(t, 24);
+        lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(t, ST_TEXT, 0);
+        lv_obj_set_style_text_font(t, fontTitle(), 0);
+        lv_obj_set_style_text_letter_space(t, 1, 0);
+        lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+        lv_label_set_text(t, title);
+    }
 
     lv_obj_t *rows = lv_obj_create(detail);
     lv_obj_set_width(rows, LV_PCT(100));

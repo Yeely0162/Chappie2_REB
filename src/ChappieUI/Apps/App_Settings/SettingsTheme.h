@@ -27,7 +27,7 @@ namespace STheme {
 constexpr lv_coord_t SCREEN_W = 280;
 constexpr lv_coord_t SCREEN_H = 240;
 constexpr lv_coord_t HEADER_H = 30;
-constexpr lv_coord_t SUBHEADER_H = 34;   /* sub-page bar: back button only */
+constexpr lv_coord_t SUBHEADER_H = 30;   /* sub-page title bar */
 constexpr lv_coord_t PAGE_H   = 210;
 
 struct RowRefs {
@@ -47,6 +47,7 @@ struct ModuleHero {
 
 /* Fonts from the project resource pool. */
 lv_font_t *fontSmall();
+lv_font_t *fontSmallBold();
 lv_font_t *fontValue();
 lv_font_t *fontTitle();
 
@@ -63,8 +64,11 @@ lv_obj_t *header(lv_obj_t *parent, const char *title, lv_event_cb_t back, void *
 lv_obj_t *page(lv_obj_t *parent);
 
 /**
- * @brief Build the module header. `rowCount` reserves the exact height needed
- *        for that many detailRow() rows so the body below never overlaps.
+ * @brief Build the module header (module icon + detail rows). `title` is
+ *        optional: sub-pages show the page name in the top title bar instead,
+ *        so they pass nullptr and the rows move up.
+ *        `rowCount` reserves the exact height needed so the body below never
+ *        overlaps.
  */
 ModuleHero moduleHero(lv_obj_t *parent, const void *icon, const char *title, int rowCount);
 

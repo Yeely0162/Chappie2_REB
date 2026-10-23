@@ -27,11 +27,11 @@ do{\
         IMPORT_FONT(bahnschrift_65);
         // IMPORT_FONT(agencyb_36);
         // IMPORT_FONT(agencyb_36_1);
-        // IMPORT_FONT(UbuntuBold18);
-        
+        IMPORT_FONT(UbuntuBold18);
+
         // Apple fonts SF—Bold, SF—Regular
-        IMPORT_FONT(apple_regular_13);
-        IMPORT_FONT(apple_bold_17);
+        // IMPORT_FONT(apple_regular_13);
+        // IMPORT_FONT(apple_bold_17);
 
 
         /* Import Images */
