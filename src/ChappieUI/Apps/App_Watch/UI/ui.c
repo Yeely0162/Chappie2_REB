@@ -103,7 +103,7 @@ void ui_ScreenWatchWarma_screen_init(void)
     lv_label_set_text(ui_WatchWarmaLabel, "18:01");
     lv_obj_set_style_text_color(ui_WatchWarmaLabel, lv_color_hex(0xFFCB4C), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_WatchWarmaLabel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_WatchWarmaLabel, &ui_font_MontserratBold48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_WatchWarmaLabel, ResourcePool_GetFont("MontserratBold48"), LV_PART_MAIN | LV_STATE_DEFAULT);
 
 }
 
@@ -131,7 +131,7 @@ void ui_ScreenWatchThink_screen_init(void)
     lv_label_set_text(ui_WatchThinkLabelHour, "18");
     lv_obj_set_style_text_color(ui_WatchThinkLabelHour, lv_color_hex(0xFFCB4C), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_WatchThinkLabelHour, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_WatchThinkLabelHour, &ui_font_MontserratBold48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_WatchThinkLabelHour, ResourcePool_GetFont("MontserratBold48"), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_WatchThinkLabelMinute = lv_label_create(ui_ScreenWatchThink);
     lv_obj_set_width(ui_WatchThinkLabelMinute, LV_SIZE_CONTENT);   /// 1
@@ -142,7 +142,7 @@ void ui_ScreenWatchThink_screen_init(void)
     lv_label_set_text(ui_WatchThinkLabelMinute, "01");
     lv_obj_set_style_text_color(ui_WatchThinkLabelMinute, lv_color_hex(0xFFCB4C), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_WatchThinkLabelMinute, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_WatchThinkLabelMinute, &ui_font_MontserratBold48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_WatchThinkLabelMinute, ResourcePool_GetFont("MontserratBold48"), LV_PART_MAIN | LV_STATE_DEFAULT);
 
 }
 void ui_ScreenWatchLaugh_screen_init(void)
@@ -207,7 +207,7 @@ void ui_ScreenWatchApple_screen_init(void){
     lv_obj_set_x(ui_WatchAppleLabelHour, -15);
     lv_obj_set_y(ui_WatchAppleLabelHour, 25);
     lv_obj_set_align(ui_WatchAppleLabelHour,LV_FLEX_ALIGN_SPACE_EVENLY);
-    lv_obj_set_style_text_font(ui_WatchAppleLabelHour,&ui_font_FontUbuntuBold96,LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_WatchAppleLabelHour,ResourcePool_GetFont("UbuntuBold96"),LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(ui_WatchAppleLabelHour,lv_color_hex(0x53DE77),LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(ui_WatchAppleLabelHour, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_WatchAppleLabelHour, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
@@ -217,7 +217,7 @@ void ui_ScreenWatchApple_screen_init(void){
     lv_obj_set_y(ui_WatchAppleLabelMinute, 125);
     lv_label_set_text(ui_WatchAppleLabelMinute,":09");
     lv_obj_set_align(ui_WatchAppleLabelMinute,LV_FLEX_ALIGN_SPACE_EVENLY);
-    lv_obj_set_style_text_font(ui_WatchAppleLabelMinute,&ui_font_FontUbuntuBold96,LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_WatchAppleLabelMinute,ResourcePool_GetFont("UbuntuBold96"),LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(ui_WatchAppleLabelMinute,lv_color_hex(0x53DE77),LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_flag(ui_WatchAppleLabelMinute, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_WatchAppleLabelMinute, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
@@ -254,7 +254,7 @@ void ui_ScreenWatchApple_screen_init(void){
     lv_obj_set_y(TemperLabel, -40);
     lv_label_set_text(TemperLabel,"30");
     lv_obj_set_style_text_color(TemperLabel,lv_color_hex(0x53DE77),LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(TemperLabel,&ui_font_MontserratBold48,LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(TemperLabel,ResourcePool_GetFont("MontserratBold48"),LV_PART_MAIN | LV_STATE_DEFAULT);
     
     lv_obj_set_align(TemperLabel, LV_FLEX_ALIGN_SPACE_AROUND);
     // lv_obj_add_event_cb(ui_ScreenWatchApple,sleep_event_cb,LV_EVENT_PRESSED,NULL);

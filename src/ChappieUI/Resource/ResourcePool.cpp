@@ -27,8 +27,12 @@ do{\
         IMPORT_FONT(bahnschrift_65);
         // IMPORT_FONT(agencyb_36);
         // IMPORT_FONT(agencyb_36_1);
+        IMPORT_FONT(Digital16);
+        IMPORT_FONT(UbuntuBold16);
         IMPORT_FONT(UbuntuBold18);
-
+        IMPORT_FONT(MontserratBold48);
+        IMPORT_FONT(UbuntuBold96);
+        IMPORT_FONT(UbuntuReg48);
         // Apple fonts SF—Bold, SF—Regular
         // IMPORT_FONT(apple_regular_13);
         // IMPORT_FONT(apple_bold_17);
@@ -41,7 +45,6 @@ do{\
         IMPORT_IMG(battery_dark);
         IMPORT_IMG(battery_info);
         IMPORT_IMG(battery);
-        IMPORT_IMG(battery2);
         IMPORT_IMG(bluetooth_dark);
         IMPORT_IMG(clock_dark);
         IMPORT_IMG(disk_green);
@@ -87,4 +90,19 @@ lv_font_t* ResourcePool::GetFont(const char* name)
 const void* ResourcePool::GetImage(const char* name)
 {
     return Image_.GetResource(name);
+}
+
+extern "C" void ResourcePool_Init(void)
+{
+    ResourcePool::Init();
+}
+
+extern "C" lv_font_t *ResourcePool_GetFont(const char *name)
+{
+    return ResourcePool::GetFont(name);
+}
+
+extern "C" const void *ResourcePool_GetImage(const char *name)
+{
+    return ResourcePool::GetImage(name);
 }

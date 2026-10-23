@@ -43,6 +43,35 @@ static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_colo
  **********************/
 static LGFX_EmmaDisplay* _lcd;
 
+/*
+ * Panel scan-out rate.
+ *
+ * A full 280x240 RGB565 frame is 134,400 bytes = 13.4 ms on the 80 MHz SPI
+ * bus. The ST7789 scans its 320-line memory in ~16.7 ms at the stock 60 Hz,
+ * i.e. the 280 visible lines are scanned in ~13.6 ms. A write therefore takes
+ * almost exactly as long as one panel scan: the scan pointer catches the write
+ * pointer and the panel shows the new frame above the seam and the previous
+ * frame below it (horizontal tearing during any animation).
+ *
+ * There is no TE/VSYNC pin and no MISO on this panel, so the scan phase cannot
+ * be measured. The only remaining lever is the scan speed itself: FRCTRL2
+ * (0xC6) lowers the panel frame rate, which lengthens the per-line scan time
+ * and lets one contiguous GRAM write finish ahead of the scan.
+ *
+ * 0x03 is the value used here (lowest-but-one step). Stock is 0x0F. If the
+ * panel shows flicker or judder on real hardware, raise this one value back
+ * towards 0x0F - nothing else depends on it.
+ */
+#define CHAPPIE_PANEL_FRCTRL2 0x03
+
+static void panel_set_scan_rate(LGFX_EmmaDisplay* lcd, uint8_t frctrl2)
+{
+    lcd->startWrite();
+    lcd->writeCommand(0xC6);        /* FRCTRL2: frame rate control, normal mode */
+    lcd->writeData(frctrl2);
+    lcd->endWrite();
+}
+
 /**********************
  *      MACROS
  **********************/
@@ -59,6 +88,10 @@ void lv_port_disp_init(LGFX_EmmaDisplay* lcd)
     // disp_init();
     _lcd = lcd;
     lcd->clear();
+
+    /* Slow the panel scan before the first LVGL frame is pushed (see the
+     * comment next to CHAPPIE_PANEL_FRCTRL2 above). */
+    panel_set_scan_rate(_lcd, CHAPPIE_PANEL_FRCTRL2);
 
     /*-----------------------------
      * Create a buffer for drawing
@@ -115,7 +148,7 @@ void lv_port_disp_init(LGFX_EmmaDisplay* lcd)
     }
 
     lv_disp_draw_buf_init(&draw_buf_dsc_3, buf_3_1, buf_3_2,
-                          MY_DISP_VER_RES * LV_VER_RES_MAX);   /*Initialize the display buffer*/
+                          MY_DISP_HOR_RES * MY_DISP_VER_RES);   /*Initialize the display buffer*/
 
     /*-----------------------------------
      * Register the display in LVGL
@@ -136,8 +169,14 @@ void lv_port_disp_init(LGFX_EmmaDisplay* lcd)
     /*Set a display buffer*/
     disp_drv.draw_buf = &draw_buf_dsc_3;
 
-    /*Required for Example 3)*/
-    disp_drv.full_refresh = 1;
+    /* Buffer is screen-sized, so LVGL can still render any dirty area in a
+     * single piece. Partial refresh is used instead of full_refresh: a full
+     * refresh re-sends 134 KB for every animation frame even when only a row
+     * or a status bar changed. With partial refresh the flush only covers the
+     * invalidated area, which shortens each GRAM write and raises the frame
+     * rate (the buffers stay screen-sized, so a full-screen change is still
+     * rendered and flushed in one pass - no extra banding is introduced). */
+    disp_drv.full_refresh = 0;
 
     /* Fill a memory array with a color if you have GPU.
      * Note that, in lv_conf.h you can enable GPUs that has built-in support in LVGL.

@@ -140,7 +140,7 @@ void ui_ScreenLauncher_screen_init(void)
     lv_obj_set_style_text_letter_space(ui_LabelBrightness, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_line_space(ui_LabelBrightness, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(ui_LabelBrightness, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_LabelBrightness, &ui_font_FontUbuntuBold16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LabelBrightness, ResourcePool_GetFont("UbuntuBold16"), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ButtonAutoScreenOff = lv_btn_create(ui_ArcBrightness);
     lv_obj_set_width(ui_ButtonAutoScreenOff, 155);
@@ -167,7 +167,7 @@ void ui_ScreenLauncher_screen_init(void)
     lv_obj_set_style_text_opa(ui_LabelBtnAutoScreenOff, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_letter_space(ui_LabelBtnAutoScreenOff, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_line_space(ui_LabelBtnAutoScreenOff, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_LabelBtnAutoScreenOff, &ui_font_FontUbuntuBold16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LabelBtnAutoScreenOff, ResourcePool_GetFont("UbuntuBold16"), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ButtonInfos = lv_btn_create(ui_PanelControlPad);
     lv_obj_set_width(ui_ButtonInfos, 60);
@@ -245,7 +245,7 @@ void ui_ScreenLauncher_screen_init(void)
     lv_obj_set_style_text_opa(ui_LabelHomeTime, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_letter_space(ui_LabelHomeTime, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_line_space(ui_LabelHomeTime, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_LabelHomeTime, &ui_font_FontUbuntuBold96, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LabelHomeTime, ResourcePool_GetFont("UbuntuBold96"), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelStateBarTime1 = lv_label_create(ui_PanelHome);
     lv_obj_set_width(ui_LabelStateBarTime1, LV_SIZE_CONTENT);   /// 280
@@ -258,7 +258,7 @@ void ui_ScreenLauncher_screen_init(void)
     lv_obj_set_style_text_opa(ui_LabelStateBarTime1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_letter_space(ui_LabelStateBarTime1, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_line_space(ui_LabelStateBarTime1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_LabelStateBarTime1, &ui_font_FontUbuntuBold18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LabelStateBarTime1, ResourcePool_GetFont("UbuntuBold18"), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ImgStateBar = lv_img_create(ui_ScreenLauncher);
     lv_img_set_src(ui_ImgStateBar, &ui_img_img_statebar_png);
@@ -281,8 +281,8 @@ void ui_ScreenLauncher_screen_init(void)
     lv_obj_set_style_text_letter_space(ui_LabelStateBarTime, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_line_space(ui_LabelStateBarTime, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(ui_LabelStateBarTime, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_LabelStateBarTime, &ui_font_FontUbuntuBold16, LV_PART_MAIN | LV_STATE_DEFAULT);
-    
+    lv_obj_set_style_text_font(ui_LabelStateBarTime, ResourcePool_GetFont("UbuntuBold16"), LV_PART_MAIN | LV_STATE_DEFAULT);
+
     ui_ImgBattery = lv_img_create(ui_ImgStateBar);
     lv_img_set_src(ui_ImgBattery, &ui_img_img_battery_png);
     lv_obj_set_width(ui_ImgBattery, LV_SIZE_CONTENT);   /// 32
@@ -332,7 +332,7 @@ void ui_ScreenLauncher_screen_init(void)
     ui_BatteryLabel = Create_Bar_LabelOrIcon(ui_ImgStateBar,ui_BatteryLabel,"100");
     lv_obj_set_x(ui_BatteryLabel, 86);
     lv_obj_set_align(ui_BatteryLabel, LV_ALIGN_CENTER);
-    lv_obj_set_style_text_font(ui_BatteryLabel, &ui_font_FontUbuntuBold16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_BatteryLabel, ResourcePool_GetFont("UbuntuBold16"), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(ui_BatteryLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_BatteryBar = lv_bar_create(ui_ImgBattery);

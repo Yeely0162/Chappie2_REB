@@ -4,13 +4,13 @@
  * Opts: --bpp 8 --size 96 --font C:\Users\Forairaaaaa\Desktop\Launcher\assets\Ubuntu-Bold.ttf -o C:\Users\Forairaaaaa\Desktop\Launcher\assets\ui_font_FontUbuntuBold96.c --format lvgl -r 0x20-0x7f --no-compress --no-prefilter
  ******************************************************************************/
 
-#include "ui.h"
+#include "lvgl.h"
 
-#ifndef UI_FONT_FONTUBUNTUBOLD96
-#define UI_FONT_FONTUBUNTUBOLD96 1
+#ifndef FONT_UBUNTUBOLD96
+#define FONT_UBUNTUBOLD96 1
 #endif
 
-#if UI_FONT_FONTUBUNTUBOLD96
+#if FONT_UBUNTUBOLD96
 
 /*-----------------
  *    BITMAPS
@@ -36106,9 +36106,9 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
 
 /*Initialize a public general font descriptor*/
 #if LV_VERSION_CHECK(8, 0, 0)
-const lv_font_t ui_font_FontUbuntuBold96 = {
+const lv_font_t font_UbuntuBold96 = {
 #else
-lv_font_t ui_font_FontUbuntuBold96 = {
+lv_font_t font_UbuntuBold96 = {
 #endif
     .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,    /*Function pointer to get glyph's data*/
     .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,    /*Function pointer to get glyph's bitmap*/
@@ -36126,5 +36126,5 @@ lv_font_t ui_font_FontUbuntuBold96 = {
 
 
 
-#endif /*#if UI_FONT_FONTUBUNTUBOLD96*/
+#endif /*#if FONT_UBUNTUBOLD96*/
 

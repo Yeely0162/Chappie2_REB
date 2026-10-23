@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #include "lvgl.h"
-
+#include "./ChappieUI/Resource/ResourcePool.h"
 void StateBarDropDown_Animation(lv_obj_t * TargetObject, int delay);
 void StateBarPullUp_Animation(lv_obj_t * TargetObject, int delay);
 lv_obj_t * Create_Bar_LabelOrIcon(lv_obj_t * obj, lv_obj_t * targetObj,const char * value);
@@ -46,9 +46,6 @@ LV_IMG_DECLARE(ui_img_img_battery_png);    // assets\IMG_Battery.png
 LV_IMG_DECLARE(ui_img_img_icon_defalut_png);    // assets\IMG_Icon_Defalut.png
 LV_IMG_DECLARE(ui_img_img_Charing_png);    // assets\IMG_Icon_Defalut.png
 
-LV_FONT_DECLARE(ui_font_FontUbuntuBold16);
-LV_FONT_DECLARE(ui_font_FontUbuntuBold18);
-LV_FONT_DECLARE(ui_font_FontUbuntuBold96);
 
 
 void ui_init(void);

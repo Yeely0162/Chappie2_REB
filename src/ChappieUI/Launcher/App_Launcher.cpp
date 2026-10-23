@@ -10,7 +10,6 @@
  */
 #include "App_Launcher.h"
 #include "../ChappieUIConfigs.h"
-#include "../Resource/ResourcePool.h"
 #include "UI/ui.h"
 
 static const char *week[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -169,7 +168,7 @@ namespace App {
             lv_obj_align(app_name, LV_ALIGN_CENTER, i * 180 + 560, 95);
             lv_label_set_text(app_name, App::Register[i].appName().c_str());
             lv_obj_set_style_text_color(app_name, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_font(app_name, &ui_font_FontUbuntuBold18, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_font(app_name, ResourcePool::GetFont("UbuntuBold18"), LV_PART_MAIN | LV_STATE_DEFAULT);
         }
 
         /* The control-pad buttons drive real services and are not local

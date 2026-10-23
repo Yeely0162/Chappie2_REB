@@ -4,13 +4,13 @@
  * Opts: --bpp 8 --size 48 --font C:\Users\Forairaaaaa\Desktop\Watch\assets\Montserrat\static\Montserrat-Bold.ttf -o C:\Users\Forairaaaaa\Desktop\Watch\assets\Montserrat\static\ui_font_MontserratBold48.c --format lvgl -r 0x20-0x7f --no-compress --no-prefilter
  ******************************************************************************/
 
-#include "ui.h"
+#include "lvgl.h"
 
-#ifndef UI_FONT_MONTSERRATBOLD48
-#define UI_FONT_MONTSERRATBOLD48 1
+#ifndef FONT_MONTSERRATBOLD48
+#define FONT_MONTSERRATBOLD48 1
 #endif
 
-#if UI_FONT_MONTSERRATBOLD48
+#if FONT_MONTSERRATBOLD48
 
 /*-----------------
  *    BITMAPS
@@ -10658,9 +10658,9 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
 
 /*Initialize a public general font descriptor*/
 #if LV_VERSION_CHECK(8, 0, 0)
-const lv_font_t ui_font_MontserratBold48 = {
+const lv_font_t font_MontserratBold48 = {
 #else
-lv_font_t ui_font_MontserratBold48 = {
+lv_font_t font_MontserratBold48 = {
 #endif
     .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,    /*Function pointer to get glyph's data*/
     .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,    /*Function pointer to get glyph's bitmap*/
@@ -10678,5 +10678,5 @@ lv_font_t ui_font_MontserratBold48 = {
 
 
 
-#endif /*#if UI_FONT_MONTSERRATBOLD48*/
+#endif /*#if FONT_MONTSERRATBOLD48*/
 

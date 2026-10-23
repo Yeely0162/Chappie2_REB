@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #include "lvgl.h"
-// #include "ChappieUI\Resource\ResourcePool.h"
+#include "./ChappieUI/Resource/ResourcePool.h"
 
 void WatchLaughPointerRotate_Animation_hour(lv_obj_t * TargetObject, int delay);
 void WatchLaughPointerRotate_Animation_minute(lv_obj_t * TargetObject, int delay);

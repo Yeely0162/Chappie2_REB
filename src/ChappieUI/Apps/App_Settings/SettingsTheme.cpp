@@ -17,6 +17,12 @@ lv_font_t *fontSmallBold()
     return f ? f : (lv_font_t *)LV_FONT_DEFAULT;
 }
 
+lv_font_t *fontDigital()
+{
+    lv_font_t *f = ResourcePool::GetFont("Digital16");
+    return f ? f : (lv_font_t *)LV_FONT_DEFAULT;
+}
+
 lv_font_t *fontValue()
 {
     lv_font_t *f = ResourcePool::GetFont("bahnschrift_17");
@@ -244,7 +250,7 @@ lv_obj_t *section(lv_obj_t *parent, const char *title)
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(label, SCREEN_W - 16);
     lv_obj_set_style_text_color(label, ST_MUTED, 0);
-    lv_obj_set_style_text_font(label, fontSmallBold(), 0);
+    lv_obj_set_style_text_font(label, fontDigital(), 0);
     lv_obj_set_style_text_letter_space(label, 1, 0);
     lv_obj_set_style_pad_left(label, 4, 0);
     lv_obj_set_style_pad_top(label, 2, 0);
