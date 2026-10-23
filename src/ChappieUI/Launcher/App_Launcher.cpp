@@ -10,6 +10,7 @@
  */
 #include "App_Launcher.h"
 #include "../ChappieUIConfigs.h"
+#include "../Resource/ResourcePool.h"
 #include "UI/ui.h"
 
 static const char *week[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -33,6 +34,9 @@ struct DeviceStatus_t {
     uint32_t autoScreenOffSleep = (1000UL * 60UL) * 20UL;   // 20 min
 };
 static DeviceStatus_t _device_status;
+
+/* Small charging bolt overlay on top of the status-bar battery body. */
+static lv_obj_t *s_bolt = nullptr;
 
 namespace {
 
@@ -173,6 +177,31 @@ namespace App {
         lv_obj_clear_flag(ui_ButtonWifi, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_clear_flag(ui_ButtonBle, LV_OBJ_FLAG_CHECKABLE);
 
+        /* Charging badge: a small bolt drawn on top of the battery body.
+         * The battery outline and its level bar are children of
+         * ui_ImgBattery and stay visible in both states; charging only
+         * toggles this overlay. Created once per launcher build. */
+        s_bolt = nullptr;
+        if (ui_ImgBattery) {
+            /* Fixed geometry in both charge states, set once: the status bar
+             * must not re-layout when the charger is plugged or removed. */
+            lv_img_set_src(ui_ImgBattery, &ui_img_img_battery_png);
+            lv_obj_set_size(ui_ImgBattery, 32, 27);
+            lv_img_set_zoom(ui_ImgBattery, 256);
+            lv_obj_clear_flag(ui_BatteryBar, LV_OBJ_FLAG_HIDDEN);
+
+            const lv_img_dsc_t *bolt = (const lv_img_dsc_t *)ResourcePool::GetImage("bolt");
+            if (bolt) {
+                s_bolt = lv_img_create(ui_ImgBattery);
+                lv_img_set_src(s_bolt, bolt);
+                lv_obj_center(s_bolt);
+                lv_obj_set_style_img_recolor(s_bolt, lv_color_hex(0x18C7A8), 0);
+                lv_obj_set_style_img_recolor_opa(s_bolt, 255, 0);
+                lv_obj_clear_flag(s_bolt, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_add_flag(s_bolt, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+
         /* Add ui event call back */
         lv_obj_add_event_cb(ui_PanelDesktop, scroll_event_cb, LV_EVENT_SCROLL_END, NULL);
         lv_obj_add_event_cb(ui_ArcBrightness, panel_control_pad_event_cb, LV_EVENT_VALUE_CHANGED, this);
@@ -244,6 +273,7 @@ namespace App {
         if (ui_ScreenLauncher)
             lv_obj_del(ui_ScreenLauncher);
         ui_ScreenLauncher = nullptr;
+        s_bolt = nullptr;      /* deleted with the screen above */
     }
 
 
@@ -384,20 +414,14 @@ namespace App {
             snprintf(label_buffer, sizeof(label_buffer), "--");
         lv_label_set_text(ui_BatteryLabel, label_buffer);
 
-        lv_img_set_src(ui_ImgBattery, charging ? &ui_img_img_Charing_png : &ui_img_img_battery_png);
-        /* Source icons are 20x20 (charging) and 32x27 (discharging); scale the
-         * charging one and size the widget so nothing is clipped. */
-        if (charging) {
-            lv_obj_set_size(ui_ImgBattery, 30, 30);
-            lv_img_set_zoom(ui_ImgBattery, 384);
-        } else {
-            lv_obj_set_size(ui_ImgBattery, 32, 27);
-            lv_img_set_zoom(ui_ImgBattery, 256);
+        /* The battery body and its level bar are static widgets (configured
+         * in onCreate). Only the charging bolt changes with the real state. */
+        if (s_bolt) {
+            if (charging)
+                lv_obj_clear_flag(s_bolt, LV_OBJ_FLAG_HIDDEN);
+            else
+                lv_obj_add_flag(s_bolt, LV_OBJ_FLAG_HIDDEN);
         }
-        if (charging)
-            lv_obj_add_flag(ui_BatteryBar, LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_clear_flag(ui_BatteryBar, LV_OBJ_FLAG_HIDDEN);
 
         lv_obj_set_style_text_color(ui_BatteryLabel,
             !valid ? COL_MUTED : (low ? COL_RED : COL_WHITE), 0);

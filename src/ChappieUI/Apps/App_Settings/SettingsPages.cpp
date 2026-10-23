@@ -41,14 +41,14 @@ struct ModuleDef {
 };
 
 static const ModuleDef MODULES[MODULE_COUNT] = {
-    {Wifi,      "Wi-Fi",     "wifi_dark",      {"Status",     "Network", "Mode"}},
-    {Bluetooth, "Bluetooth", "bluetooth_dark", {"Status",     "Paired",  "Name"}},
-    {Time,      "Time",      "clock_dark",     {"Time",       "Date",    "NTP"}},
-    {Display,   "Display",   "monitor_dark",   {"Brightness", "Panel",   "Touch"}},
-    {Battery,   "Battery",   "battery_dark",   {"Level",      "Voltage", "State"}},
-    {Keys,      "Buttons",   "system_info",    {"A key",      "B key",   "Mapping"}},
-    // {Test,      "Device",    "ok_dark",        {"Touch",      "Display", "Chip"}},
-    {About,     "About",     "about_dark",     {"Model",      "Firmware","Heap"}},
+    {Wifi,      "Wi-Fi",     "nav_wifi",      {"Status",     "Network", "Mode"}},
+    {Bluetooth, "Bluetooth", "nav_bluetooth", {"Status",     "Paired",  "Name"}},
+    {Time,      "Time",      "nav_time",      {"Time",       "Date",    "NTP"}},
+    {Display,   "Display",   "nav_display",   {"Brightness", "Panel",   "Touch"}},
+    {Battery,   "Battery",   "nav_battery",   {"Level",      "Voltage", "State"}},
+    {Keys,      "Buttons",   "nav_buttons",   {"A key",      "B key",   "Mapping"}},
+    // {Test,      "Device",    "nav_device",    {"Touch",      "Display", "Chip"}},
+    {About,     "About",     "nav_about",     {"Model",      "Firmware","Heap"}},
 };
 
 static int module_index_for(PageId page)
@@ -61,16 +61,16 @@ static int module_index_for(PageId page)
 
 /**
  * @brief Resolve a module icon. A name missing from the resource pool must not
- *        leave an empty slot in the layout: fall back to the generic system
- *        icon and say so once on the serial log.
+ *        leave an empty slot in the layout: fall back to the neutral info icon
+ *        from the same uniform set and say so once on the serial log.
  */
 static const void *module_icon(const char *name)
 {
     const void *img = name ? ResourcePool::GetImage(name) : nullptr;
     if (!img) {
-        printf("[Settings] icon '%s' missing from ResourcePool, using system_info\n",
+        printf("[Settings] icon '%s' missing from ResourcePool, using nav_about\n",
                name ? name : "(null)");
-        img = ResourcePool::GetImage("system_info");
+        img = ResourcePool::GetImage("nav_about");
     }
     return img;
 }
@@ -78,11 +78,12 @@ static const void *module_icon(const char *name)
 /**
  * @brief Draw a module icon into an lv_img with a consistent zoom.
  *
- * The resource pool mixes 35x35 and 36x36 sources and three colour formats
- * (indexed, alpha mask, true colour + alpha). Recolouring to the theme text
- * colour normalises them to one white line style, and sizing from the image
- * descriptor keeps the drawn size identical instead of clipping the 36 px
- * source into a 35 px box.
+ * All Settings icons now come from one 48x48 ALPHA_8BIT set (`nav_*`) drawn
+ * with the same 2 px stroke, so they share a canvas, weight and optical
+ * centre. ALPHA_8BIT is used because the sw renderer paints it through the
+ * img_recolor colour (one blend pass) - that is how the line art becomes the
+ * theme text colour without a second full-colour bitmap per icon.
+ * Sizing from the descriptor keeps the drawn size exact for any source.
  */
 static void apply_icon(lv_obj_t *img, const char *name, uint16_t zoom)
 {
@@ -318,7 +319,7 @@ constexpr lv_coord_t CAR_VIEW_H  = 178;
 constexpr lv_coord_t CAR_ROW_H   = 158;
 constexpr lv_coord_t CAR_ROW_GAP = (CAR_VIEW_H - CAR_ROW_H) / 2;
 constexpr lv_coord_t CAR_ICON_X  = 14;
-constexpr uint16_t   CAR_ICON_ZOOM = 410;   /* 35 px source -> 56 px */
+constexpr uint16_t   CAR_ICON_ZOOM = 256;   /* 56 px source drawn 1:1 */
 constexpr lv_coord_t CAR_RAIL_X  = 96;
 constexpr lv_coord_t CAR_RAIL_Y  = 14;
 constexpr lv_coord_t CAR_RAIL_W  = 5;

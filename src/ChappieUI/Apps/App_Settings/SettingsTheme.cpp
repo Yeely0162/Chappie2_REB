@@ -144,7 +144,7 @@ ModuleHero moduleHero(lv_obj_t *parent, const void *icon, const char *title, int
         lv_obj_t *img = lv_img_create(box);
         const lv_img_dsc_t *dsc = (const lv_img_dsc_t *)icon;
         lv_img_set_src(img, dsc);
-        lv_img_set_zoom(img, 330);                  /* 35 px -> 45 px */
+        lv_img_set_zoom(img, 256);                  /* 56 px, drawn 1:1 */
         lv_obj_set_size(img,
                         (lv_coord_t)((int32_t)dsc->header.w * 330 / 256),
                         (lv_coord_t)((int32_t)dsc->header.h * 330 / 256));
