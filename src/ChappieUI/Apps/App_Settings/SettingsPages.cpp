@@ -38,7 +38,7 @@ static void back_cb(lv_event_t *e)
  * header and the home carousel can never disagree about which icon belongs to
  * which module.
  */
-constexpr int MODULE_COUNT = 8;
+constexpr int MODULE_COUNT = 7;
 
 struct ModuleDef {
     PageId page;
@@ -54,7 +54,7 @@ static const ModuleDef MODULES[MODULE_COUNT] = {
     {Display,   "Display",   "monitor_dark",   {"Brightness", "Panel",   "Touch"}},
     {Battery,   "Battery",   "battery_dark",   {"Level",      "Voltage", "State"}},
     {Keys,      "Buttons",   "system_info",    {"A key",      "B key",   "Mapping"}},
-    {Test,      "Device",    "ok_dark",        {"Touch",      "Display", "Chip"}},
+    // {Test,      "Device",    "ok_dark",        {"Touch",      "Display", "Chip"}},
     {About,     "About",     "about_dark",     {"Model",      "Firmware","Heap"}},
 };
 
@@ -107,16 +107,15 @@ static void apply_icon(lv_obj_t *img, const char *name, uint16_t zoom)
 }
 
 /**
- * @brief Sub-page shell: back button, the module's own icon and its title.
+ * @brief Sub-page shell.
  *
- * The dual-colour bar belongs to the home carousel only. Drawing a copy of it
- * in this header made the Wi-Fi page look as if its module icon had been
- * replaced by the position bar, so the bar is deliberately absent here.
+ * The bar holds a 32x32 back button and nothing else: the module icon and the
+ * centred module title live in the module header at the top of the body, so
+ * they cannot be confused with the carousel rail and never duplicate it.
  */
 static lv_obj_t *shell(lv_obj_t *parent, PageId page)
 {
-    const int index = module_index_for(page);
-    const char *title = index >= 0 ? MODULES[index].title : "Settings";
+    (void)page;                         /* icon/title come from moduleHero() */
 
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_set_size(root, SCREEN_W, SCREEN_H);
@@ -129,7 +128,7 @@ static lv_obj_t *shell(lv_obj_t *parent, PageId page)
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *hdr = lv_obj_create(root);
-    lv_obj_set_size(hdr, SCREEN_W, HEADER_H);
+    lv_obj_set_size(hdr, SCREEN_W, SUBHEADER_H);
     lv_obj_set_pos(hdr, 0, 0);
     lv_obj_set_style_bg_color(hdr, ST_BG, 0);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
@@ -138,10 +137,14 @@ static lv_obj_t *shell(lv_obj_t *parent, PageId page)
     lv_obj_set_style_pad_all(hdr, 0, 0);
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* 32x32 hit area, drawn on top of the body separator. */
     lv_obj_t *back = lv_btn_create(hdr);
-    lv_obj_set_size(back, 26, 26);
-    lv_obj_set_pos(back, 5, 2);
+    lv_obj_set_size(back, 32, 32);
+    lv_obj_set_pos(back, 3, 1);
     lv_obj_set_style_bg_opa(back, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(back, ST_PANEL_HI, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(back, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(back, 8, 0);
     lv_obj_set_style_border_width(back, 0, 0);
     lv_obj_set_style_shadow_width(back, 0, 0);
     lv_obj_set_style_pad_all(back, 0, 0);
@@ -152,22 +155,31 @@ static lv_obj_t *shell(lv_obj_t *parent, PageId page)
     lv_obj_set_style_text_font(backIcon, &lv_font_montserrat_18, 0);
     lv_obj_center(backIcon);
 
-    if (index >= 0) {
-        lv_obj_t *icon = lv_img_create(hdr);
-        apply_icon(icon, MODULES[index].icon, 183);   /* 35 px -> 25 px */
-        lv_obj_set_pos(icon, 36, 3);
-    }
-
-    lv_obj_t *label = lv_label_create(hdr);
-    lv_obj_set_pos(label, 66, 5);
-    lv_obj_set_size(label, SCREEN_W - 66 - 8, 22);
-    lv_label_set_text(label, title);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_color(label, ST_TEXT, 0);
-    lv_obj_set_style_text_font(label, fontTitle(), 0);
-    lv_obj_set_style_text_letter_space(label, 1, 0);
+    /* Thin separator between the bar and the page body. */
+    lv_obj_t *line = lv_obj_create(hdr);
+    lv_obj_set_size(line, SCREEN_W, 1);
+    lv_obj_set_pos(line, 0, SUBHEADER_H - 1);
+    lv_obj_set_style_bg_color(line, ST_LINE, 0);
+    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(line, 0, 0);
+    lv_obj_set_style_radius(line, 0, 0);
+    lv_obj_set_style_pad_all(line, 0, 0);
+    lv_obj_clear_flag(line, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
 
     return root;
+}
+
+/**
+ * @brief Module header for a sub-page, resolved from the shared module table
+ *        so the icon can never drift from the carousel.
+ */
+static STheme::ModuleHero hero_for(lv_obj_t *page, PageId id, int rowCount)
+{
+    const int index = module_index_for(id);
+    const void *icon = index >= 0 ? module_icon(MODULES[index].icon) : nullptr;
+    const char *title = index >= 0 ? MODULES[index].title : "Settings";
+    return STheme::moduleHero(page, icon, title, rowCount);
 }
 
 static void set_text_buf(lv_obj_t *label, const char *fmt, ...)
@@ -365,7 +377,6 @@ static int g_carHomeIndex = 0;
 static int32_t g_carRailFrom = 0;   /* rail fill endpoints, 1/256 index units */
 static int32_t g_carRailTo = 0;
 static bool g_carAnimating = false;
-static uint32_t g_carLastInput = 0;
 
 static void car_refresh_all();
 
@@ -474,13 +485,6 @@ static void car_step(int dir)
     if (!g_carView || g_carAnimating)
         return;
 
-    /* A single swipe must move exactly one step; the driver can report the
-     * same gesture on more than one object. */
-    uint32_t now = millis();
-    if (g_carLastInput && now - g_carLastInput < 140)
-        return;
-    g_carLastInput = now;
-
     g_carDir = dir;
     g_carFrom = g_carSel;
 
@@ -515,38 +519,135 @@ static void car_step(int dir)
     lv_anim_start(&g_carAnim);
 }
 
-static void car_gesture_cb(lv_event_t *e)
+/*
+ * Touch handling
+ * --------------
+ * LVGL 8 sends LV_EVENT_CLICKED on release whenever the pressed object is not
+ * being scrolled (lv_indev.c: `if(scroll_obj == NULL) send CLICKED`). The panel
+ * is not scrollable, so every swipe also produced a click: that is why the
+ * carousel used to enter the module it had just swiped to. LVGL's own gesture
+ * event only fires after 50 px of travel, and a slow or short swipe never
+ * reaches it.
+ *
+ * All input is therefore handled by the carousel viewport itself (the rows are
+ * deliberately not clickable, so the press never migrates while the finger
+ * moves):
+ *   - a vertical drag >= CAR_SWIPE_PX moves exactly one module and latches for
+ *     the rest of that touch;
+ *   - a release with less than CAR_TAP_PX of travel is a tap: the centre row
+ *     opens its page, a neighbour row only becomes selected;
+ *   - no CLICKED handler exists anywhere, so a swipe can never open a page.
+ */
+constexpr lv_coord_t CAR_SWIPE_PX = 22;
+constexpr lv_coord_t CAR_TAP_PX   = 14;
+
+static lv_point_t g_carPressPoint;
+static int g_carPressSlot = -1;
+static bool g_carSessionActive = false;
+static bool g_carSwiped = false;
+static uint32_t g_carTapBlockUntil = 0;
+
+static lv_indev_t *car_event_indev(lv_event_t *e)
 {
-    lv_indev_t *indev = lv_indev_get_act();
+    lv_indev_t *indev = lv_event_get_indev(e);
     if (!indev)
-        return;
-    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-    if (dir == LV_DIR_TOP)
-        car_step(1);
-    else if (dir == LV_DIR_BOTTOM)
-        car_step(-1);
+        indev = lv_indev_get_act();
+    return indev;
 }
 
-static void car_row_click_cb(lv_event_t *e)
+/** Map a point inside the carousel viewport to the row shown there. */
+static int car_slot_at(lv_coord_t y)
 {
-    /* While a transition runs the row still shows the previous module; do not
-     * open anything from that state. */
+    if (y < CAR_ROW_GAP)
+        return 0;
+    if (y < CAR_ROW_GAP + CAR_ROW_H)
+        return 1;
+    return 2;
+}
+
+static void car_press_cb(lv_event_t *e)
+{
     if (g_carAnimating)
         return;
 
-    /* Ignore the click that LVGL synthesises at the end of a swipe; only an
-     * explicit tap opens a sub-page. */
-    if (g_carLastInput && millis() - g_carLastInput < 350)
+    lv_indev_t *indev = car_event_indev(e);
+    if (!indev)
         return;
 
-    uintptr_t slot = (uintptr_t)lv_event_get_user_data(e);
-    if (slot > 2)
+    lv_indev_get_point(indev, &g_carPressPoint);
+
+    lv_area_t a;
+    lv_obj_get_coords(g_carView, &a);
+    g_carPressSlot = car_slot_at((lv_coord_t)(g_carPressPoint.y - a.y1));
+
+    g_carSessionActive = true;
+    g_carSwiped = false;
+}
+
+static void car_pressing_cb(lv_event_t *e)
+{
+    if (!g_carSessionActive || g_carSwiped)
         return;
 
-    int index = g_carSlotIndex[slot];
-    if (index < 0 || !g_nav)
+    lv_indev_t *indev = car_event_indev(e);
+    if (!indev)
         return;
-    g_nav((uint8_t)MODULES[index].page);
+
+    lv_point_t p;
+    lv_indev_get_point(indev, &p);
+    const int32_t dx = p.x - g_carPressPoint.x;
+    const int32_t dy = p.y - g_carPressPoint.y;
+
+    if (LV_ABS(dy) >= CAR_SWIPE_PX && LV_ABS(dy) > LV_ABS(dx)) {
+        g_carSwiped = true;
+        g_carTapBlockUntil = millis() + 400;   /* release must not tap */
+        car_step(dy < 0 ? 1 : -1);             /* finger up = next module */
+    }
+}
+
+static void car_release_cb(lv_event_t *e)
+{
+    if (!g_carSessionActive)
+        return;
+
+    const bool swiped = g_carSwiped;
+    const int slot = g_carPressSlot;
+    g_carSessionActive = false;
+    g_carSwiped = false;
+    g_carPressSlot = -1;
+
+    /* This touch was a swipe: never treat its release as a click. */
+    if (swiped || g_carAnimating || millis() < g_carTapBlockUntil)
+        return;
+
+    lv_indev_t *indev = car_event_indev(e);
+    if (indev) {
+        lv_point_t p;
+        lv_indev_get_point(indev, &p);
+        if (LV_ABS(p.x - g_carPressPoint.x) > CAR_TAP_PX ||
+            LV_ABS(p.y - g_carPressPoint.y) > CAR_TAP_PX)
+            return;                     /* neither a swipe step nor a clean tap */
+    }
+
+    if (slot == 1) {
+        const int index = g_carSlotIndex[1];
+        if (index >= 0 && g_nav)
+            g_nav((uint8_t)MODULES[index].page);
+    } else if (slot == 0) {
+        car_step(-1);
+    } else if (slot == 2) {
+        car_step(1);
+    }
+}
+
+static void car_press_lost_cb(lv_event_t *e)
+{
+    /* Only happens if the finger leaves the viewport; the swipe cooldown set
+     * in car_pressing_cb() still blocks a stray tap afterwards. */
+    (void)e;
+    g_carSessionActive = false;
+    g_carSwiped = false;
+    g_carPressSlot = -1;
 }
 
 static void car_bind_slot(int slot, int index)
@@ -649,10 +750,10 @@ static void car_format_values(const ModuleDef &m, char out[3][48])
         snprintf(out[1], 48, "Back / home");
         snprintf(out[2], 48, "A:9  B:0");
         break;
-    case Test:
-        snprintf(out[0], 48, "%s", g_dev->Tp.isReady() ? "CST816D OK" : "Not detected");
-        snprintf(out[1], 48, "ST7789V");
-        snprintf(out[2], 48, "ESP32-S3");
+    // case Test:
+    //     snprintf(out[0], 48, "%s", g_dev->Tp.isReady() ? "CST816D OK" : "Not detected");
+    //     snprintf(out[1], 48, "ST7789V");
+    //     snprintf(out[2], 48, "ESP32-S3");
         break;
     case About:
         snprintf(out[0], 48, "Chappie 2");
@@ -702,9 +803,9 @@ static void car_create_row(int slot, lv_obj_t *parent)
     lv_obj_set_style_radius(r.row, 0, 0);
     lv_obj_set_style_pad_all(r.row, 0, 0);
     lv_obj_clear_flag(r.row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(r.row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(r.row, car_row_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)slot);
-    lv_obj_add_event_cb(r.row, car_gesture_cb, LV_EVENT_GESTURE, nullptr);
+    /* Not clickable on purpose: presses must reach the carousel viewport,
+     * which owns the whole swipe/tap state machine. */
+    lv_obj_clear_flag(r.row, LV_OBJ_FLAG_CLICKABLE);
 
     r.icon = lv_img_create(r.row);
     apply_icon(r.icon, MODULES[0].icon, CAR_ICON_ZOOM);   /* 35 px -> 56 px */
@@ -757,9 +858,11 @@ lv_obj_t *buildRoot(lv_obj_t *parent, CHAPPIE *dev)
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Slim title bar. No instructions, no placeholder glyphs. */
+    /* Centred on the real screen width; no fixed left margin. */
     lv_obj_t *title = lv_label_create(root);
-    lv_obj_set_pos(title, 12, 4);
+    lv_obj_set_size(title, SCREEN_W, 24);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(title, ST_TEXT, 0);
     lv_obj_set_style_text_font(title, fontTitle(), 0);
     lv_obj_set_style_text_letter_space(title, 1, 0);
@@ -775,7 +878,10 @@ lv_obj_t *buildRoot(lv_obj_t *parent, CHAPPIE *dev)
     lv_obj_set_style_pad_all(g_carView, 0, 0);
     lv_obj_clear_flag(g_carView, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(g_carView, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_carView, car_gesture_cb, LV_EVENT_GESTURE, nullptr);
+    lv_obj_add_event_cb(g_carView, car_press_cb, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(g_carView, car_pressing_cb, LV_EVENT_PRESSING, nullptr);
+    lv_obj_add_event_cb(g_carView, car_release_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(g_carView, car_press_lost_cb, LV_EVENT_PRESS_LOST, nullptr);
 
     for (int slot = 0; slot < 3; slot++)
         car_create_row(slot, g_carView);
@@ -1160,7 +1266,7 @@ static void refresh_wifi()
     } else {
         net = "--";
     }
-    setEllipsis(g_wifi.network, net.c_str(), 138);
+    setEllipsis(g_wifi.network, net.c_str(), 134);
     setValue(g_wifi.ip, g_dev->Wf.LocalIP().c_str());
 
     bool ap = g_dev->Wf.isAPActive();
@@ -1223,7 +1329,7 @@ static lv_obj_t *buildWifi(lv_obj_t *parent)
     g_wifi.state = infoRow(page, "Status", g_dev->Wf.stateText()).value;
     g_wifi.network = infoRow(page, "Network", "--").value;
     g_wifi.ip = infoRow(page, "IP address", "--").value;
-
+    
     g_wifi.err = lv_label_create(page);
     lv_label_set_text(g_wifi.err, "");
     lv_label_set_long_mode(g_wifi.err, LV_LABEL_LONG_WRAP);
@@ -1401,9 +1507,9 @@ static void refresh_ble()
     if (!g_dev) return;
     setSwitch(g_ble.sw, g_dev->Ble.isEnabled());
     setValue(g_ble.status, g_dev->Ble.stateText());
-    setEllipsis(g_ble.name, g_dev->Ble.getDeviceName().c_str(), 138);
+    setEllipsis(g_ble.name, g_dev->Ble.getDeviceName().c_str(), 134);
     String addr = g_dev->Ble.getConnectedAddress();
-    setEllipsis(g_ble.addr, addr.length() ? addr.c_str() : "--", 138);
+    setEllipsis(g_ble.addr, addr.length() ? addr.c_str() : "--", 134);
 
     char b[32];
     snprintf(b, sizeof(b), "%d", g_dev->Ble.getBondCount());
@@ -1568,8 +1674,8 @@ static lv_obj_t *buildTime(lv_obj_t *parent)
 
     g_time.time = infoRow(page, "Time", "--:--:--").value;
     g_time.date = infoRow(page, "Date", "--").value;
-    g_time.rtc = infoRow(page, "RTC (BM8563)", "Unavailable").value;
-
+    g_time.rtc = infoRow(page, "RTC (BM8563)", "Unavailable").value;    
+    
     section(page, "NETWORK TIME");
     switchRow(page, "Auto NTP sync", g_dev->Wf.AutoTime, ntp_auto_cb, nullptr, &g_time.autoSw);
     g_time.ntp = infoRow(page, "NTP status", "Idle").value;
@@ -1617,73 +1723,6 @@ static lv_obj_t *buildTime(lv_obj_t *parent)
 
     g_time.syncBtn = button(page, "Sync now", ST_BLUE, ntp_sync_cb, nullptr);
     refresh_time();
-    return root;
-}
-
-/* ========================================================================= */
-/* Display page                                                              */
-/* ========================================================================= */
-
-static struct {
-    lv_obj_t *slider = nullptr;
-    lv_obj_t *pct = nullptr;
-    lv_obj_t *touch = nullptr;
-    lv_obj_t *res = nullptr;
-    lv_obj_t *driver = nullptr;
-    lv_obj_t *touchIc = nullptr;
-    lv_obj_t *lvgl = nullptr;
-} g_disp;
-
-static void brightness_cb(lv_event_t *e)
-{
-    if (!g_dev) return;
-    lv_obj_t *slider = lv_event_get_target(e);
-    int32_t pct = lv_slider_get_value(slider);
-    uint8_t duty = (uint8_t)((pct * 255) / 100);
-    g_dev->Lcd.setBrightness(duty);
-    set_text_buf(g_disp.pct, "%d%%", (int)pct);
-}
-
-static void refresh_display()
-{
-    if (!g_dev) return;
-    uint16_t pct = (uint16_t)g_dev->Lcd.getBrightness() * 100 / 255;
-    if (g_disp.slider)
-        lv_slider_set_value(g_disp.slider, pct, LV_ANIM_OFF);
-    set_text_buf(g_disp.pct, "%u%%", (unsigned)pct);
-    setValue(g_disp.touch, g_dev->Tp.isReady() ? "OK" : "Not detected");
-    setDanger(g_disp.touch, !g_dev->Tp.isReady());
-}
-
-static lv_obj_t *buildDisplay(lv_obj_t *parent)
-{
-    lv_obj_t *root = shell(parent, Display);
-    lv_obj_t *page = STheme::page(root);
-
-    uint16_t pct = (uint16_t)g_dev->Lcd.getBrightness() * 100 / 255;
-    sliderRow(page, "Brightness", 0, 100, pct, brightness_cb, nullptr,
-               &g_disp.slider, &g_disp.pct);
-
-    section(page, "PANEL");
-    g_disp.res = infoRow(page, "Resolution", "280 x 240").value;
-    g_disp.driver = infoRow(page, "Driver IC", "ST7789V").value;
-    g_disp.touchIc = infoRow(page, "Touch IC", "CST816D").value;
-    g_disp.touch = infoRow(page, "Touch status", "OK").value;
-    g_disp.lvgl = infoRow(page, "LVGL", LVGL_VERSION_INFO).value;
-
-    section(page, "NOTES");
-    lv_obj_t *note = lv_label_create(page);
-    lv_label_set_text(note,
-        "Brightness is PWM on the backlight rail (GPIO45) and is shared "
-        "with the launcher quick control. Auto-brightness is not supported "
-        "by the current hardware.");
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(note, LV_PCT(100));
-    lv_obj_set_style_text_color(note, ST_MUTED, 0);
-    lv_obj_set_style_text_font(note, fontSmall(), 0);
-    lv_obj_set_style_pad_left(note, 4, 0);
-
-    refresh_display();
     return root;
 }
 
@@ -2228,19 +2267,93 @@ static void refresh_test()
     setDanger(g_test.touch, !g_dev->Tp.isReady());
 }
 
-static lv_obj_t *buildTest(lv_obj_t *parent)
+// static lv_obj_t *buildTest(lv_obj_t *parent)
+// {
+//     lv_obj_t *root = shell(parent, Test);
+//     lv_obj_t *page = STheme::page(root);
+
+//     section(page, "HARDWARE TEST");
+//     entry_row(page, "Touch test", "Full screen, live coordinates", touch_test_open_cb);
+//     entry_row(page, "Display test", "Full screen colour patterns", display_test_open_cb);
+
+//     section(page, "DEVICE");
+//     infoRow(page, "Multi-touch", "Not supported");
+//     infoRow(page, "Touch IC", "CST816D");
+
+//     esp_chip_info_t chip;
+//     esp_chip_info(&chip);
+//     char buf[32];
+//     snprintf(buf, sizeof(buf), "ESP32-S3 rev %d", chip.revision);
+//     infoRow(page, "Chip", buf);
+//     uint32_t flash = 0;
+//     esp_flash_get_size(NULL, &flash);
+//     snprintf(buf, sizeof(buf), "%lu MB", (unsigned long)(flash / (1024 * 1024)));
+//     infoRow(page, "Flash", buf);
+//     snprintf(buf, sizeof(buf), "%u MB", (unsigned)(ESP.getPsramSize() / (1024 * 1024)));
+//     infoRow(page, "PSRAM", buf);
+//     infoRow(page, "Display", "ST7789V 280x240");
+//     infoRow(page, "PMIC", "AXP173");
+
+//     refresh_test();
+//     return root;
+// }
+
+/* ========================================================================= */
+/* Display page                                                              */
+/* ========================================================================= */
+
+static struct {
+    lv_obj_t *slider = nullptr;
+    lv_obj_t *pct = nullptr;
+    lv_obj_t *touch = nullptr;
+    lv_obj_t *res = nullptr;
+    lv_obj_t *driver = nullptr;
+    lv_obj_t *touchIc = nullptr;
+    lv_obj_t *lvgl = nullptr;
+} g_disp;
+
+static void brightness_cb(lv_event_t *e)
 {
-    lv_obj_t *root = shell(parent, Test);
+    if (!g_dev) return;
+    lv_obj_t *slider = lv_event_get_target(e);
+    int32_t pct = lv_slider_get_value(slider);
+    uint8_t duty = (uint8_t)((pct * 255) / 100);
+    g_dev->Lcd.setBrightness(duty);
+    set_text_buf(g_disp.pct, "%d%%", (int)pct);
+}
+
+static void refresh_display()
+{
+    if (!g_dev) return;
+    uint16_t pct = (uint16_t)g_dev->Lcd.getBrightness() * 100 / 255;
+    if (g_disp.slider)
+        lv_slider_set_value(g_disp.slider, pct, LV_ANIM_OFF);
+    set_text_buf(g_disp.pct, "%u%%", (unsigned)pct);
+    setValue(g_disp.touch, g_dev->Tp.isReady() ? "OK" : "Not detected");
+    setDanger(g_disp.touch, !g_dev->Tp.isReady());
+}
+
+static lv_obj_t *buildDisplay(lv_obj_t *parent)
+{
+    lv_obj_t *root = shell(parent, Display);
     lv_obj_t *page = STheme::page(root);
 
+    uint16_t pct = (uint16_t)g_dev->Lcd.getBrightness() * 100 / 255;
+    sliderRow(page, "Brightness", 0, 100, pct, brightness_cb, nullptr,
+               &g_disp.slider, &g_disp.pct);
+    
     section(page, "HARDWARE TEST");
     entry_row(page, "Touch test", "Full screen, live coordinates", touch_test_open_cb);
     entry_row(page, "Display test", "Full screen colour patterns", display_test_open_cb);
 
-    section(page, "DEVICE");
-    g_test.touch = infoRow(page, "Touch controller", "OK").value;
+
+    section(page, "PANEL");
     infoRow(page, "Multi-touch", "Not supported");
-    infoRow(page, "Touch IC", "CST816D");
+    g_disp.res = infoRow(page, "Display", "280 x 240").value;
+    g_disp.driver = infoRow(page, "Driver IC", "ST7789V").value;
+    g_disp.touchIc = infoRow(page, "Touch IC", "CST816D").value;
+    g_disp.touch = infoRow(page, "Touch status", "OK").value;
+    g_disp.lvgl = infoRow(page, "LVGL", LVGL_VERSION_INFO).value;
 
     esp_chip_info_t chip;
     esp_chip_info(&chip);
@@ -2253,10 +2366,21 @@ static lv_obj_t *buildTest(lv_obj_t *parent)
     infoRow(page, "Flash", buf);
     snprintf(buf, sizeof(buf), "%u MB", (unsigned)(ESP.getPsramSize() / (1024 * 1024)));
     infoRow(page, "PSRAM", buf);
-    infoRow(page, "Display", "ST7789V 280x240");
-    infoRow(page, "PMIC", "AXP173");
+    
+    
+    section(page, "NOTES");
+    lv_obj_t *note = lv_label_create(page);
+    lv_label_set_text(note,
+        "Brightness is PWM on the backlight rail (GPIO45) and is shared "
+        "with the launcher quick control. Auto-brightness is not supported "
+        "by the current hardware.");
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, LV_PCT(100));
+    lv_obj_set_style_text_color(note, ST_MUTED, 0);
+    lv_obj_set_style_text_font(note, fontSmall(), 0);
+    lv_obj_set_style_pad_left(note, 4, 0);
 
-    refresh_test();
+    refresh_display();
     return root;
 }
 
@@ -2288,7 +2412,7 @@ static lv_obj_t *buildAbout(lv_obj_t *parent)
 
     section(page, "DEVICE");
     infoRow(page, "Model", "Chappie 2");
-    infoRow(page, "MCU", "ESP32-S3 N16R8");
+    infoRow(page, "MCU", "ESP32-S3");
     infoRow(page, "Flash / PSRAM", "16 MB / 8 MB");
     infoRow(page, "Display", "1.69in 240x280");
     infoRow(page, "Touch", "CST816D");
@@ -2298,7 +2422,7 @@ static lv_obj_t *buildAbout(lv_obj_t *parent)
     section(page, "SOFTWARE");
     infoRow(page, "Firmware", "V1.1");
     infoRow(page, "LVGL", LVGL_VERSION_INFO);
-    infoRow(page, "Build", __DATE__ " " __TIME__);
+    infoRow(page, "Build", __DATE__ " ");
 
     section(page, "RUNTIME");
     g_about.uptime = infoRow(page, "Uptime", "--").value;
@@ -2322,7 +2446,7 @@ lv_obj_t *buildPage(PageId page, lv_obj_t *parent, CHAPPIE *dev)
     case Display: return buildDisplay(parent);
     case Battery: return buildBattery(parent);
     case Keys: return buildKeys(parent);
-    case Test: return buildTest(parent);
+    // case Test: return buildTest(parent);
     case About: return buildAbout(parent);
     case Root:
     default: return buildRoot(parent, dev);
@@ -2343,7 +2467,7 @@ void refresh()
     case Display: refresh_display(); break;
     case Battery: refresh_battery(); break;
     case Keys: break;
-    case Test: refresh_test(); break;
+    // case Test: refresh_test(); break;
     case About: refresh_about(); break;
     default: break;
     }

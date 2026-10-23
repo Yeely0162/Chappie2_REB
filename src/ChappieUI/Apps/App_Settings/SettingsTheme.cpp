@@ -11,6 +11,12 @@ lv_font_t *fontSmall()
     return f ? f : (lv_font_t *)LV_FONT_DEFAULT;
 }
 
+lv_font_t *fontSmallBold()
+{
+    lv_font_t *f = ResourcePool::GetFont("UbuntuBold18");
+    return f ? f : (lv_font_t *)LV_FONT_DEFAULT;
+}
+
 lv_font_t *fontValue()
 {
     lv_font_t *f = ResourcePool::GetFont("bahnschrift_17");
@@ -96,8 +102,8 @@ lv_obj_t *header(lv_obj_t *parent, const char *title, lv_event_cb_t back, void *
 lv_obj_t *page(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_obj_create(parent);
-    lv_obj_set_size(obj, SCREEN_W, PAGE_H);
-    lv_obj_set_pos(obj, 0, HEADER_H);
+    lv_obj_set_size(obj, SCREEN_W, SCREEN_H - SUBHEADER_H);
+    lv_obj_set_pos(obj, 0, SUBHEADER_H);
     lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(obj, 0, 0);
     lv_obj_set_style_radius(obj, 0, 0);
@@ -112,6 +118,122 @@ lv_obj_t *page(lv_obj_t *parent)
     return obj;
 }
 
+ModuleHero moduleHero(lv_obj_t *parent, const void *icon, const char *title, int rowCount)
+{
+    ModuleHero hero;
+
+    /* title 24 + pad 2 + rows at 22 px pitch with 2 px gaps */
+    const lv_coord_t h = (lv_coord_t)(28 + rowCount * 24);
+    /* Page body content width (280 - 2 * 8) minus the icon column. */
+    const lv_coord_t detail_w = (SCREEN_W - 16) - 64;
+
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_set_size(box, LV_PCT(100), h);
+    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_radius(box, 0, 0);
+    lv_obj_set_style_pad_all(box, 0, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    hero.box = box;
+
+    /* Left: the module's own icon. It is a normal image widget; the rail is
+     * never used here. */
+    if (icon) {
+        lv_obj_t *img = lv_img_create(box);
+        const lv_img_dsc_t *dsc = (const lv_img_dsc_t *)icon;
+        lv_img_set_src(img, dsc);
+        lv_img_set_zoom(img, 330);                  /* 35 px -> 45 px */
+        lv_obj_set_size(img,
+                        (lv_coord_t)((int32_t)dsc->header.w * 330 / 256),
+                        (lv_coord_t)((int32_t)dsc->header.h * 330 / 256));
+        lv_obj_set_style_img_recolor(img, ST_TEXT, 0);
+        lv_obj_set_style_img_recolor_opa(img, 255, 0);
+        lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_align(img, LV_ALIGN_LEFT_MID, 4, 0);
+    }
+
+    /* Right: title centred over the detail column, then the rows. */
+    lv_obj_t *detail = lv_obj_create(box);
+    lv_obj_set_pos(detail, 64, 0);
+    lv_obj_set_size(detail, detail_w, h);
+    lv_obj_set_style_bg_opa(detail, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(detail, 0, 0);
+    lv_obj_set_style_radius(detail, 0, 0);
+    lv_obj_set_style_pad_all(detail, 0, 0);
+    lv_obj_set_style_pad_row(detail, 2, 0);
+    lv_obj_set_flex_flow(detail, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(detail, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_clear_flag(detail, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(detail, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *t = lv_label_create(detail);
+    lv_obj_set_width(t, LV_PCT(100));
+    lv_obj_set_height(t, 24);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(t, ST_TEXT, 0);
+    lv_obj_set_style_text_font(t, fontTitle(), 0);
+    lv_obj_set_style_text_letter_space(t, 1, 0);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
+    lv_label_set_text(t, title ? title : "");
+
+    lv_obj_t *rows = lv_obj_create(detail);
+    lv_obj_set_width(rows, LV_PCT(100));
+    lv_obj_set_height(rows, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(rows, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(rows, 0, 0);
+    lv_obj_set_style_radius(rows, 0, 0);
+    lv_obj_set_style_pad_all(rows, 0, 0);
+    lv_obj_set_style_pad_row(rows, 2, 0);
+    lv_obj_set_flex_flow(rows, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(rows, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_clear_flag(rows, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(rows, LV_OBJ_FLAG_CLICKABLE);
+    /* Layout inside detailRow needs the final column width; the flex layout
+     * has not run yet at this point. */
+    lv_obj_set_user_data(rows, (void *)(intptr_t)detail_w);
+    hero.rows = rows;
+
+    return hero;
+}
+
+lv_obj_t *detailRow(lv_obj_t *rows, const char *label, const char *value)
+{
+    lv_coord_t w = 0;
+    if (rows)
+        w = (lv_coord_t)(intptr_t)lv_obj_get_user_data(rows);
+    if (w <= 0)
+        w = (SCREEN_W - 16) - 64;
+
+    lv_obj_t *row = lv_obj_create(rows);
+    lv_obj_set_size(row, LV_PCT(100), 22);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_radius(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *lab = lv_label_create(row);
+    lv_obj_set_pos(lab, 0, 1);
+    lv_obj_set_size(lab, 58, 20);
+    lv_obj_set_style_text_color(lab, ST_MUTED, 0);
+    lv_obj_set_style_text_font(lab, fontSmall(), 0);
+    lv_label_set_long_mode(lab, LV_LABEL_LONG_DOT);
+    lv_label_set_text(lab, label ? label : "");
+
+    lv_obj_t *val = lv_label_create(row);
+    lv_obj_set_pos(val, 62, 0);
+    lv_obj_set_size(val, w - 62, 22);
+    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(val, ST_TEXT, 0);
+    lv_obj_set_style_text_font(val, fontValue(), 0);
+    lv_label_set_long_mode(val, LV_LABEL_LONG_DOT);
+    setEllipsis(val, value ? value : "--", w - 64);
+
+    return val;
+}
+
 lv_obj_t *section(lv_obj_t *parent, const char *title)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -119,7 +241,7 @@ lv_obj_t *section(lv_obj_t *parent, const char *title)
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(label, SCREEN_W - 16);
     lv_obj_set_style_text_color(label, ST_MUTED, 0);
-    lv_obj_set_style_text_font(label, fontSmall(), 0);
+    lv_obj_set_style_text_font(label, fontSmallBold(), 0);
     lv_obj_set_style_text_letter_space(label, 1, 0);
     lv_obj_set_style_pad_left(label, 4, 0);
     lv_obj_set_style_pad_top(label, 2, 0);

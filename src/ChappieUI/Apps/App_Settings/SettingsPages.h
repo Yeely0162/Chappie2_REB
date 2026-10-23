@@ -27,7 +27,7 @@ typedef void (*BackHandler)();
 
 void setNavHandler(NavHandler handler);
 void setBackHandler(BackHandler handler);
-
+                     
 /**
  * @brief Build the settings home page.
  */

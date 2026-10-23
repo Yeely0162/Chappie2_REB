@@ -27,11 +27,22 @@ namespace STheme {
 constexpr lv_coord_t SCREEN_W = 280;
 constexpr lv_coord_t SCREEN_H = 240;
 constexpr lv_coord_t HEADER_H = 30;
+constexpr lv_coord_t SUBHEADER_H = 34;   /* sub-page bar: back button only */
 constexpr lv_coord_t PAGE_H   = 210;
 
 struct RowRefs {
     lv_obj_t *row = nullptr;
     lv_obj_t *value = nullptr;
+};
+
+/**
+ * @brief Module header used at the top of every sub-page: the module's icon
+ *        on the left and a right-hand detail column whose title is centred
+ *        over the values, followed by compact label/value rows.
+ */
+struct ModuleHero {
+    lv_obj_t *box = nullptr;
+    lv_obj_t *rows = nullptr;
 };
 
 /* Fonts from the project resource pool. */
@@ -47,9 +58,22 @@ void styleScreen(lv_obj_t *scr);
 lv_obj_t *header(lv_obj_t *parent, const char *title, lv_event_cb_t back, void *user_data);
 
 /**
- * @brief Scrollable page body that starts below the header.
+ * @brief Scrollable page body that starts below the sub-page bar.
  */
 lv_obj_t *page(lv_obj_t *parent);
+
+/**
+ * @brief Build the module header. `rowCount` reserves the exact height needed
+ *        for that many detailRow() rows so the body below never overlaps.
+ */
+ModuleHero moduleHero(lv_obj_t *parent, const void *icon, const char *title, int rowCount);
+
+/**
+ * @brief One label/value row inside a ModuleHero. Values are right aligned to
+ *        the detail column and truncated with "..." when too long.
+ *        Returns the value label for refresh.
+ */
+lv_obj_t *detailRow(lv_obj_t *rows, const char *label, const char *value);
 
 /**
  * @brief Section caption (uppercase, muted).
