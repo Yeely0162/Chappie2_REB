@@ -31,7 +31,7 @@ static const char *WEEK[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
  * header and the home carousel can never disagree about which icon belongs to
  * which module.
  */
-constexpr int MODULE_COUNT = 7;
+constexpr int MODULE_COUNT = 8;
 
 struct ModuleDef {
     PageId page;
@@ -47,7 +47,7 @@ static const ModuleDef MODULES[MODULE_COUNT] = {
     {Display,   "Display",   "nav_display",   {"Brightness", "Panel",   "Touch"}},
     {Battery,   "Battery",   "nav_battery",   {"Level",      "Voltage", "State"}},
     {Keys,      "Buttons",   "nav_buttons",   {"A key",      "B key",   "Mapping"}},
-    // {Test,      "Device",    "nav_device",    {"Touch",      "Display", "Chip"}},
+    {Sensors,   "Sensors",   "nav_imu",       {"BMM150",     "MPU6050", "BMP280"}},
     {About,     "About",     "nav_about",     {"Model",      "Firmware","Heap"}},
 };
 
@@ -318,7 +318,8 @@ namespace {
 constexpr lv_coord_t CAR_VIEW_H  = 178;
 constexpr lv_coord_t CAR_ROW_H   = 158;
 constexpr lv_coord_t CAR_ROW_GAP = (CAR_VIEW_H - CAR_ROW_H) / 2;
-constexpr lv_coord_t CAR_ICON_X  = 14;
+constexpr lv_coord_t CAR_ICON_X  = 9;
+constexpr lv_coord_t CAR_ICON_Y  = -4;
 constexpr uint16_t   CAR_ICON_ZOOM = 256;   /* 56 px source drawn 1:1 */
 constexpr lv_coord_t CAR_RAIL_X  = 96;
 constexpr lv_coord_t CAR_RAIL_Y  = 14;
@@ -326,7 +327,7 @@ constexpr lv_coord_t CAR_RAIL_W  = 5;
 constexpr lv_coord_t CAR_RAIL_H  = 130;
 constexpr lv_coord_t CAR_INFO_X  = 108;
 constexpr lv_coord_t CAR_TITLE_W = 160;
-constexpr lv_coord_t CAR_FIELD_X = 176;
+constexpr lv_coord_t CAR_FIELD_X = 165;
 constexpr lv_coord_t CAR_FIELD_W = 92;
 constexpr uint32_t   CAR_ANIM_MS = 220;
 
@@ -691,7 +692,7 @@ static void car_bind_slot(int slot, int index)
 
     const ModuleDef &m = MODULES[index];
     apply_icon(r.icon, m.icon, CAR_ICON_ZOOM);
-    lv_obj_align(r.icon, LV_ALIGN_LEFT_MID, CAR_ICON_X, 0);
+    lv_obj_align(r.icon, LV_ALIGN_LEFT_MID, CAR_ICON_X, CAR_ICON_Y);
     lv_label_set_text(r.title, m.title);
     for (int i = 0; i < 3; i++)
         lv_label_set_text(r.field[i], m.fields[i]);
@@ -780,10 +781,10 @@ static void car_format_values(const ModuleDef &m, char out[3][48])
         snprintf(out[1], 48, "Back / home");
         snprintf(out[2], 48, "A:9  B:0");
         break;
-    // case Test:
-    //     snprintf(out[0], 48, "%s", g_dev->Tp.isReady() ? "CST816D OK" : "Not detected");
-    //     snprintf(out[1], 48, "ST7789V");
-    //     snprintf(out[2], 48, "ESP32-S3");
+    case Sensors:
+        snprintf(out[0], 48, "%s", g_dev->Mag.isReady() ? "Ready" : "Not detected");
+        snprintf(out[1], 48, "%s", g_dev->Imu.isReady() ? "Ready" : "Not detected");
+        snprintf(out[2], 48, "%s", g_dev->Env.getTemperature() != 0 ? "Ready" : "Not detected");
         break;
     case About:
         snprintf(out[0], 48, "Chappie 2");
@@ -847,7 +848,7 @@ static void car_create_row(int slot, lv_obj_t *parent)
     lv_obj_set_style_text_color(r.title, ST_TEXT, 0);
     lv_obj_set_style_text_font(r.title, fontTitle(), 0);
     lv_obj_set_style_text_letter_space(r.title, 1, 0);
-    lv_label_set_long_mode(r.title, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(r.title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(r.title, "");
 
     for (int i = 0; i < 3; i++) {
@@ -858,16 +859,16 @@ static void car_create_row(int slot, lv_obj_t *parent)
         lv_obj_set_size(r.field[i], 66, 22);
         lv_obj_set_style_text_color(r.field[i], ST_MUTED, 0);
         lv_obj_set_style_text_font(r.field[i], fontSmall(), 0);
-        lv_label_set_long_mode(r.field[i], LV_LABEL_LONG_DOT);
+        lv_label_set_long_mode(r.field[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_text(r.field[i], "");
 
         r.value[i] = lv_label_create(r.row);
         lv_obj_set_pos(r.value[i], CAR_FIELD_X, y);
         lv_obj_set_size(r.value[i], CAR_FIELD_W, 22);
-        lv_obj_set_style_text_align(r.value[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_style_text_align(r.value[i], LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_color(r.value[i], ST_TEXT, 0);
         lv_obj_set_style_text_font(r.value[i], fontValue(), 0);
-        lv_label_set_long_mode(r.value[i], LV_LABEL_LONG_DOT);
+        lv_label_set_long_mode(r.value[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_text(r.value[i], "");
     }
 }
@@ -1049,7 +1050,7 @@ static void rebuild_scan_list()
         lv_obj_t *name = lv_label_create(row);
         lv_obj_set_pos(name, 10, 5);
         lv_obj_set_size(name, 146, 24);
-        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
         setEllipsis(name, ssid.c_str(), 144);
         lv_obj_set_style_text_color(name, ST_TEXT, 0);
         lv_obj_set_style_text_font(name, fontSmall(), 0);
@@ -1975,11 +1976,13 @@ static lv_obj_t *buildKeys(lv_obj_t *parent)
     lv_obj_t *root = shell(parent, Keys);
     lv_obj_t *page = STheme::page(root);
 
-    section(page, "A BUTTON - GPIO9 / PWR_CTRL");
+    section(page, "A BUTTON");
+    infoRow(page, "GPIO", "IO9 / PWR_CTRL");
     infoRow(page, "Short press", "Power dialog");
     infoRow(page, "In dialog", "Focused action");
 
-    section(page, "B BUTTON - GPIO0 / KEY_DWN1");
+    section(page, "B BUTTON");
+    infoRow(page, "GPIO", "IO0 / KEY_DWN1");
     infoRow(page, "Short press", "Back / home");
     infoRow(page, "In dialog", "Cancel");
 
@@ -2293,44 +2296,127 @@ static lv_obj_t *entry_row(lv_obj_t *parent, const char *title, const char *subt
 
     return row;
 }
+/* ==============================Page Sensors============================ */
+static struct {
+    /*BMM150*/
+    lv_obj_t *Mstatus = nullptr;
+    lv_obj_t *Maddr = nullptr;
+    lv_obj_t *Mx = nullptr;
+    lv_obj_t *My = nullptr;
+    lv_obj_t *Mz = nullptr;
+    /*MPU6050*/
+    /*Acceleration*/
+    lv_obj_t *Ax = nullptr;
+    lv_obj_t *Ay = nullptr;
+    lv_obj_t *Az = nullptr;
 
-static void refresh_test()
+    /*Rotation*/
+    lv_obj_t *Rx = nullptr;
+    lv_obj_t *Ry = nullptr;
+    lv_obj_t *Rz = nullptr;
+    /*Temperature*/
+    lv_obj_t *ITemp = nullptr;
+    lv_obj_t *DevID = nullptr;
+    /*BMP280*/
+    lv_obj_t *BTemp = nullptr;
+    lv_obj_t *BPressure = nullptr;
+    lv_obj_t *BAltitude = nullptr;
+} g_sensors;
+
+static void refresh_sensors()
 {
     if (!g_dev) return;
-    setValue(g_test.touch, g_dev->Tp.isReady() ? "OK" : "Not detected");
-    setDanger(g_test.touch, !g_dev->Tp.isReady());
+    /*BMM150*/
+    char b[32];
+    snprintf(b, sizeof(b), "%s", g_dev->Mag.statusText(g_dev->Mag.status()));
+    setValue(g_sensors.Mstatus, b);
+    snprintf(b, sizeof(b), "%s", g_dev->Mag.address() == 0x10 ? "0x10" : "0x12");
+    setValue(g_sensors.Maddr, b);
+    snprintf(b, sizeof(b), "%.2fuT", g_dev->Mag.rawX());
+    setValue(g_sensors.Mx, b);
+    snprintf(b, sizeof(b), "%.2fuT", g_dev->Mag.rawY());
+    setValue(g_sensors.My, b);
+    snprintf(b, sizeof(b), "%.2fuT", g_dev->Mag.rawZ());
+    setValue(g_sensors.Mz, b);
+    /*MPU6050*/
+    /*Acceleration*/
+    snprintf(b, sizeof(b), "%.2fg", g_dev->Imu.getAccelerationX());
+    setValue(g_sensors.Ax, b);
+    snprintf(b, sizeof(b), "%.2fg", g_dev->Imu.getAccelerationY());
+    setValue(g_sensors.Ay, b);
+    snprintf(b, sizeof(b), "%.2fg", g_dev->Imu.getAccelerationZ());
+    setValue(g_sensors.Az, b);
+    /*Rotation*/
+    snprintf(b, sizeof(b), "%.2fd/s", g_dev->Imu.getRotationX());
+    setValue(g_sensors.Rx, b);
+    snprintf(b, sizeof(b), "%.2fd/s", g_dev->Imu.getRotationY());
+    setValue(g_sensors.Ry, b);
+    snprintf(b, sizeof(b), "%.2fd/s", g_dev->Imu.getRotationZ());
+    setValue(g_sensors.Rz, b);
+    /*Temperature*/
+    snprintf(b, sizeof(b), "%.2f℃", g_dev->Imu.getTemperature());
+    setValue(g_sensors.ITemp, b);
+    /*Device ID*/
+    snprintf(b, sizeof(b), "%s", g_dev->Imu.getDeviceID());
+    setValue(g_sensors.DevID, b);
+    /*BMP280*/
+    snprintf(b, sizeof(b), "%.2f", g_dev->Env.calcAltitude(g_dev->Env.getPressure()));
+    setValue(g_sensors.BAltitude, b);
+    snprintf(b, sizeof(b), "%.2f", g_dev->Env.getPressure());
+    setValue(g_sensors.BPressure, b);
+    snprintf(b, sizeof(b), "%.2f", g_dev->Env.getTemperature());
+    setValue(g_sensors.BTemp, b);
 }
 
-// static lv_obj_t *buildTest(lv_obj_t *parent)
-// {
-//     lv_obj_t *root = shell(parent, Test);
-//     lv_obj_t *page = STheme::page(root);
+static lv_obj_t *buildSensors(lv_obj_t *parent)
+{
+    lv_obj_t *root = shell(parent, Sensors);
+    lv_obj_t *page = STheme::page(root);
 
-//     section(page, "HARDWARE TEST");
-//     entry_row(page, "Touch test", "Full screen, live coordinates", touch_test_open_cb);
-//     entry_row(page, "Display test", "Full screen colour patterns", display_test_open_cb);
+    section(page, "BMM150");
+    g_sensors.Mstatus = infoRow(page, "Status", "--").value;
+    g_sensors.Mx = infoRow(page, "Magnetic X", "--").value;
+    g_sensors.My = infoRow(page, "Magnetic Y", "--").value;
+    g_sensors.Mz = infoRow(page, "Magnetic Z", "--").value;
 
-//     section(page, "DEVICE");
-//     infoRow(page, "Multi-touch", "Not supported");
-//     infoRow(page, "Touch IC", "CST816D");
+    section(page, "MPU6050");
+     /* Temperature */
+    section(page, "Temperature (°C)");
+    g_sensors.ITemp = infoRow(page, "Temperature", "--").value;
+    /* Device ID */
+    section(page, "Device ID");
+    g_sensors.DevID = infoRow(page, "Device ID", "--").value;
+    /*Acceleration*/
+    section(page, "Acceleration(g)");
+    g_sensors.Ax = infoRow(page, "Acceleration X", "--").value;
+    g_sensors.Ay = infoRow(page, "Acceleration Y", "--").value;
+    g_sensors.Az = infoRow(page, "Acceleration Z", "--").value;
+    /* Rotation */
+    section(page, "Angular Velocity (deg/s)");
+    g_sensors.Rx = infoRow(page, "Angular Velocity X", "--").value;
+    g_sensors.Ry = infoRow(page, "Angular Velocity Y", "--").value;
+    g_sensors.Rz = infoRow(page, "Angular Velocity Z", "--").value;
+    /* BMP280 */
+    section(page, "BMP280");
+    g_sensors.BTemp = infoRow(page, "Temperature", "--").value;
+    g_sensors.BPressure = infoRow(page, "Pressure", "--").value;
+    g_sensors.BAltitude = infoRow(page, "Altitude", "--").value;
+    section(page, "NOTES");
+    lv_obj_t *note = lv_label_create(page);
+    lv_label_set_text(note,
+        "Sensor readings are updated in real time.\n"
+        "BMM150: Magnetic field (uT)\n"
+        "MPU6050: Temperature, acceleration (g), "
+        "angular velocity (deg/s)\n"
+        "BMP280: Temperature, pressure (hPa), altitude (m)");
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, LV_PCT(100));
+    lv_obj_set_style_text_color(note, ST_MUTED, 0);
 
-//     esp_chip_info_t chip;
-//     esp_chip_info(&chip);
-//     char buf[32];
-//     snprintf(buf, sizeof(buf), "ESP32-S3 rev %d", chip.revision);
-//     infoRow(page, "Chip", buf);
-//     uint32_t flash = 0;
-//     esp_flash_get_size(NULL, &flash);
-//     snprintf(buf, sizeof(buf), "%lu MB", (unsigned long)(flash / (1024 * 1024)));
-//     infoRow(page, "Flash", buf);
-//     snprintf(buf, sizeof(buf), "%u MB", (unsigned)(ESP.getPsramSize() / (1024 * 1024)));
-//     infoRow(page, "PSRAM", buf);
-//     infoRow(page, "Display", "ST7789V 280x240");
-//     infoRow(page, "PMIC", "AXP173");
 
-//     refresh_test();
-//     return root;
-// }
+    refresh_sensors();
+    return root;
+}
 
 /* ========================================================================= */
 /* Display page                                                              */
@@ -2480,7 +2566,7 @@ lv_obj_t *buildPage(PageId page, lv_obj_t *parent, CHAPPIE *dev)
     case Display: return buildDisplay(parent);
     case Battery: return buildBattery(parent);
     case Keys: return buildKeys(parent);
-    // case Test: return buildTest(parent);
+    case Sensors: return buildSensors(parent);
     case About: return buildAbout(parent);
     case Root:
     default: return buildRoot(parent, dev);
@@ -2501,7 +2587,7 @@ void refresh()
     case Display: refresh_display(); break;
     case Battery: refresh_battery(); break;
     case Keys: break;
-    // case Test: refresh_test(); break;
+    case Sensors: refresh_sensors(); break;
     case About: refresh_about(); break;
     default: break;
     }
@@ -2578,6 +2664,7 @@ void destroy()
     g_ble = {};
     g_time = {};
     g_disp = {};
+    g_sensors = {};
     g_bat = {};
     g_test = {};
     g_about = {};

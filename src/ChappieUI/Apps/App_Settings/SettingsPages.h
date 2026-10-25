@@ -17,7 +17,7 @@ enum PageId : uint8_t {
     Display,
     Battery,
     Keys,
-    Test,
+    Sensors,
     About,
     PageCount
 };

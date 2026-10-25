@@ -13,7 +13,8 @@
 
 class ChappieENV : public BMP280 {
     private:
-        float _offset;
+        float _offset = 0;
+        bool _ready = false;
 
     public:
         using BMP280::BMP280;
@@ -22,10 +23,10 @@ class ChappieENV : public BMP280 {
         {
             setPressureOffset(pressureOffset);
 
-            bool val = BMP280::init();
+            _ready = BMP280::init();
             printf("BMP280 Init: ");
-            printf(val ? "True\n" : "False\n");
-            return val;
+            printf(_ready ? "True\n" : "False\n");
+            return _ready;
             /* Default settings from datasheet. */
             // setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
             //             Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
@@ -36,10 +37,13 @@ class ChappieENV : public BMP280 {
 
         /**
          * @brief Set pressure offset for value adjust
-         * 
-         * @param offset 
+         *
+         * @param offset
          */
         inline void setPressureOffset(float offset) { _offset = offset; }
+
+        /** True when the chip id answered at boot and trim data was loaded. */
+        inline bool isReady() const { return _ready; }
 
         /* Rewrite functions with offset */
         /*!

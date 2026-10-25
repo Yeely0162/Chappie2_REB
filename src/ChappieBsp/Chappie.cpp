@@ -128,7 +128,9 @@ void CHAPPIE::init()
     Imu.init();
     /* Init SD card */
     Sd.init();
-    
+    /* BMM150 is initialised on demand: the compass and the Settings sensor
+     * page call CHAPPIE::initMag(), which probes the chip once. Keeping it out
+     * of boot means no I2C traffic and no error log when the sensor is absent. */
     /* Init BMP280 */
     Env.init();
     

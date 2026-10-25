@@ -59,7 +59,7 @@ do{\
         IMPORT_IMG(trip);
         IMPORT_IMG(warming_dark);
         IMPORT_IMG(wifi_dark);
-
+        
         /* Settings navigation icons: one 48x48 ALPHA_8BIT set drawn with a
          * single 2 px stroke, so every module icon shares the same canvas,
          * weight and optical centre. Coloured with img_recolor at draw time. */
@@ -69,7 +69,7 @@ do{\
         IMPORT_IMG(nav_display);
         IMPORT_IMG(nav_battery);
         IMPORT_IMG(nav_buttons);
-        IMPORT_IMG(nav_device);
+        IMPORT_IMG(nav_imu);
         IMPORT_IMG(nav_about);
         /* Small charging bolt drawn on top of the status-bar battery body. */
         IMPORT_IMG(bolt);
