@@ -61,22 +61,6 @@ class CHAPPIE : public EMMA {
         ConfigWiFi Wf;
         ConfigBLE Ble;
 
-        /**
-         * @brief Init BMM150 on demand
-         *
-         * Only the App that needs the magnetometer should call this. The
-         * driver is not touched during boot, so an unused sensor produces no
-         * I2C traffic and no serial output.
-         *
-         * @return true when the sensor answered and was configured
-         */
-        inline bool initMag()
-        {
-            if (Mag.isReady())
-                return true;
-            return Mag.init(&Wire);
-        }
-
         void init();
 
         /**

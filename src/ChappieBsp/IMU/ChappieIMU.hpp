@@ -29,8 +29,10 @@ class ChappieIMU : public MPU6050 {
 
         inline void init()
         {
-            if (_ready)
-                return;
+            // /* Every call performs the full DMP init/calibration, as the snake
+            //  * app relies on when it enters. The flag only tracks the result. */
+            // _ready = false;
+            
 
             // initialize device
             initialize();

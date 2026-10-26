@@ -1829,7 +1829,10 @@ namespace App {
 
         if (_retryMagRequested) {
             _retryMagRequested = false;
-            bool ok = device->initMag();
+            /* The BSP brings the BMM150 up once at boot (CHAPPIE::init ->
+             * Mag.init). Only re-probe here when that failed or the sensor was
+             * lost; the retry reuses the same instance, never a second one. */
+            bool ok = device->Mag.isReady() || device->Mag.init();
             _magOk = ok;
             _magStatus = (uint8_t)device->Mag.status();
             _magReadFailed = false;

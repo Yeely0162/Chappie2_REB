@@ -782,9 +782,11 @@ static void car_format_values(const ModuleDef &m, char out[3][48])
         snprintf(out[2], 48, "A:9  B:0");
         break;
     case Sensors:
-        snprintf(out[0], 48, "%s", g_dev->Mag.isReady() ? "Ready" : "Not detected");
-        snprintf(out[1], 48, "%s", g_dev->Imu.isReady() ? "Ready" : "Not detected");
-        snprintf(out[2], 48, "%s", g_dev->Env.getTemperature() != 0 ? "Ready" : "Not detected");
+        /* Report the state the drivers already track; do not touch the I2C
+         * bus from the home carousel. */
+        snprintf(out[0], 48, "%s", ChappieMAG::statusText(g_dev->Mag.status()));
+        snprintf(out[1], 48, "%s", g_dev->Imu.isReady() ? "Ready" : "Not ready");
+        snprintf(out[2], 48, "%s", g_dev->Env.isReady() ? "Ready" : "Not found");
         break;
     case About:
         snprintf(out[0], 48, "Chappie 2");
@@ -2152,7 +2154,8 @@ static void open_touch_test()
 
 /* ---- Full-screen display test ------------------------------------------- */
 
-#define DISP_TEST_COUNT 5
+#define DISP_TEST_MOTION 5
+#define DISP_TEST_COUNT 6
 
 static const lv_color_t DISP_TEST_COLORS[DISP_TEST_COUNT] = {
     lv_color_hex(0xFF0000),
@@ -2160,22 +2163,64 @@ static const lv_color_t DISP_TEST_COLORS[DISP_TEST_COUNT] = {
     lv_color_hex(0x0000FF),
     lv_color_hex(0xFFFFFF),
     lv_color_hex(0x000000),
+    lv_color_hex(0x000000),
 };
 static const char *const DISP_TEST_NAMES[DISP_TEST_COUNT] = {
-    "RED", "GREEN", "BLUE", "WHITE", "BLACK",
+    "RED", "GREEN", "BLUE", "WHITE", "BLACK", "MOTION",
 };
 
 static lv_obj_t *g_dispTest = nullptr;
 static lv_obj_t *g_dispTestHint = nullptr;
 static lv_obj_t *g_dispTestHelp = nullptr;
+static lv_obj_t *g_dispTestStripes = nullptr;
 static int g_dispTestIndex = 0;
+
+/*
+ * MOTION pattern.
+ *
+ * A full-screen set of vertical bars scrolls horizontally. Every animation
+ * frame invalidates the whole screen, so this reproduces exactly the traffic
+ * of a page-slide animation. It is a diagnostic: if the bars tear at a
+ * horizontal boundary the panel is scanning while the frame is written
+ * (display timing); if they stay straight, the tear comes from the LVGL
+ * pipeline.
+ */
+static void disp_stripes_anim_cb(void *var, int32_t value)
+{
+    lv_obj_set_x((lv_obj_t *)var, value);
+}
+
+static void disp_stripes_stop()
+{
+    if (g_dispTestStripes)
+        lv_anim_del(g_dispTestStripes, disp_stripes_anim_cb);
+}
+
+static void disp_stripes_start()
+{
+    if (!g_dispTestStripes)
+        return;
+
+    disp_stripes_stop();
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, g_dispTestStripes);
+    lv_anim_set_values(&a, 0, -SCREEN_W);
+    lv_anim_set_time(&a, 900);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_exec_cb(&a, disp_stripes_anim_cb);
+    lv_anim_set_path_cb(&a, lv_anim_path_linear);
+    lv_anim_start(&a);
+}
 
 static void display_test_delete_cb(lv_event_t *e)
 {
     (void)e;
+    disp_stripes_stop();
     g_dispTest = nullptr;
     g_dispTestHint = nullptr;
     g_dispTestHelp = nullptr;
+    g_dispTestStripes = nullptr;
 }
 
 static void display_test_apply()
@@ -2183,7 +2228,17 @@ static void display_test_apply()
     if (!g_dispTest)
         return;
 
-    lv_obj_set_style_bg_color(g_dispTest, DISP_TEST_COLORS[g_dispTestIndex], 0);
+    if (g_dispTestIndex == DISP_TEST_MOTION) {
+        if (g_dispTestStripes)
+            lv_obj_clear_flag(g_dispTestStripes, LV_OBJ_FLAG_HIDDEN);
+        disp_stripes_start();
+    } else {
+        disp_stripes_stop();
+        if (g_dispTestStripes)
+            lv_obj_add_flag(g_dispTestStripes, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(g_dispTest, DISP_TEST_COLORS[g_dispTestIndex], 0);
+    }
+
     /* Keep the hint readable on every pattern. */
     const lv_color_t fg = (g_dispTestIndex == 3 || g_dispTestIndex == 1) ? lv_color_hex(0x000000)
                                                                        : ST_TEXT;
@@ -2223,6 +2278,32 @@ static void open_display_test()
 
     lv_obj_add_event_cb(o, display_test_delete_cb, LV_EVENT_DELETE, nullptr);
     lv_obj_add_event_cb(o, display_test_click_cb, LV_EVENT_CLICKED, nullptr);
+
+    /* Scrolling bars (two screens wide, wraps seamlessly). Created before the
+     * labels so the hint stays on top; hidden until the MOTION pattern. */
+    g_dispTestStripes = lv_obj_create(o);
+    lv_obj_set_size(g_dispTestStripes, SCREEN_W * 2, SCREEN_H);
+    lv_obj_set_pos(g_dispTestStripes, 0, 0);
+    lv_obj_set_style_bg_color(g_dispTestStripes, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_dispTestStripes, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_dispTestStripes, 0, 0);
+    lv_obj_set_style_radius(g_dispTestStripes, 0, 0);
+    lv_obj_set_style_pad_all(g_dispTestStripes, 0, 0);
+    lv_obj_clear_flag(g_dispTestStripes, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(g_dispTestStripes, LV_OBJ_FLAG_CLICKABLE);
+    for (int i = 0; i < 20; i++) {
+        lv_obj_t *bar = lv_obj_create(g_dispTestStripes);
+        lv_obj_set_size(bar, 14, SCREEN_H);
+        lv_obj_set_pos(bar, i * 28, 0);
+        lv_obj_set_style_bg_color(bar, ST_TEXT, 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(bar, 0, 0);
+        lv_obj_set_style_radius(bar, 0, 0);
+        lv_obj_set_style_pad_all(bar, 0, 0);
+        lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_add_flag(g_dispTestStripes, LV_OBJ_FLAG_HIDDEN);
 
     g_dispTestHint = lv_label_create(o);
     lv_obj_set_pos(g_dispTestHint, 0, 106);
@@ -2326,46 +2407,90 @@ static struct {
 static void refresh_sensors()
 {
     if (!g_dev) return;
-    /*BMM150*/
+
     char b[32];
-    snprintf(b, sizeof(b), "%s", g_dev->Mag.statusText(g_dev->Mag.status()));
+
+    /* ---------------- BMM150: one compensated sample per refresh ------- */
+    snprintf(b, sizeof(b), "%s", ChappieMAG::statusText(g_dev->Mag.status()));
     setValue(g_sensors.Mstatus, b);
-    snprintf(b, sizeof(b), "%s", g_dev->Mag.address() == 0x10 ? "0x10" : "0x12");
+    setDanger(g_sensors.Mstatus, !g_dev->Mag.isReady());
+
+    /* address() is a uint8_t, print it as a number. */
+    snprintf(b, sizeof(b), "0x%02X", (unsigned)g_dev->Mag.address());
     setValue(g_sensors.Maddr, b);
-    snprintf(b, sizeof(b), "%.2fuT", g_dev->Mag.rawX());
-    setValue(g_sensors.Mx, b);
-    snprintf(b, sizeof(b), "%.2fuT", g_dev->Mag.rawY());
-    setValue(g_sensors.My, b);
-    snprintf(b, sizeof(b), "%.2fuT", g_dev->Mag.rawZ());
-    setValue(g_sensors.Mz, b);
-    /*MPU6050*/
-    /*Acceleration*/
-    snprintf(b, sizeof(b), "%.2fg", g_dev->Imu.getAccelerationX());
-    setValue(g_sensors.Ax, b);
-    snprintf(b, sizeof(b), "%.2fg", g_dev->Imu.getAccelerationY());
-    setValue(g_sensors.Ay, b);
-    snprintf(b, sizeof(b), "%.2fg", g_dev->Imu.getAccelerationZ());
-    setValue(g_sensors.Az, b);
-    /*Rotation*/
-    snprintf(b, sizeof(b), "%.2fd/s", g_dev->Imu.getRotationX());
-    setValue(g_sensors.Rx, b);
-    snprintf(b, sizeof(b), "%.2fd/s", g_dev->Imu.getRotationY());
-    setValue(g_sensors.Ry, b);
-    snprintf(b, sizeof(b), "%.2fd/s", g_dev->Imu.getRotationZ());
-    setValue(g_sensors.Rz, b);
-    /*Temperature*/
-    snprintf(b, sizeof(b), "%.2f℃", g_dev->Imu.getTemperature());
-    setValue(g_sensors.ITemp, b);
-    /*Device ID*/
-    snprintf(b, sizeof(b), "%s", g_dev->Imu.getDeviceID());
-    setValue(g_sensors.DevID, b);
-    /*BMP280*/
-    snprintf(b, sizeof(b), "%.2f", g_dev->Env.calcAltitude(g_dev->Env.getPressure()));
-    setValue(g_sensors.BAltitude, b);
-    snprintf(b, sizeof(b), "%.2f", g_dev->Env.getPressure());
-    setValue(g_sensors.BPressure, b);
-    snprintf(b, sizeof(b), "%.2f", g_dev->Env.getTemperature());
-    setValue(g_sensors.BTemp, b);
+
+    float mx = 0.0f, my = 0.0f, mz = 0.0f;
+    if (g_dev->Mag.read(mx, my, mz)) {
+        snprintf(b, sizeof(b), "%.2f uT", mx);
+        setValue(g_sensors.Mx, b);
+        snprintf(b, sizeof(b), "%.2f uT", my);
+        setValue(g_sensors.My, b);
+        snprintf(b, sizeof(b), "%.2f uT", mz);
+        setValue(g_sensors.Mz, b);
+    } else {
+        /* A failed read is not a valid zero-field measurement. */
+        setValue(g_sensors.Mx, "--");
+        setValue(g_sensors.My, "--");
+        setValue(g_sensors.Mz, "--");
+    }
+
+    /* ---------------- MPU6050 ------------------------------------------ */
+    if (g_dev->Imu.isReady()) {
+        int16_t ax = 0, ay = 0, az = 0, gx = 0, gy = 0, gz = 0;
+        g_dev->Imu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+        /* AFS_SEL = 0 (+/-2 g) -> 16384 LSB/g; the DMP configures
+         * FS_SEL = 3 (+/-2000 deg/s) -> 16.4 LSB/(deg/s). */
+        snprintf(b, sizeof(b), "%.2f g", ax / 16384.0f);
+        setValue(g_sensors.Ax, b);
+        snprintf(b, sizeof(b), "%.2f g", ay / 16384.0f);
+        setValue(g_sensors.Ay, b);
+        snprintf(b, sizeof(b), "%.2f g", az / 16384.0f);
+        setValue(g_sensors.Az, b);
+
+        snprintf(b, sizeof(b), "%.1f d/s", gx / 16.4f);
+        setValue(g_sensors.Rx, b);
+        snprintf(b, sizeof(b), "%.1f d/s", gy / 16.4f);
+        setValue(g_sensors.Ry, b);
+        snprintf(b, sizeof(b), "%.1f d/s", gz / 16.4f);
+        setValue(g_sensors.Rz, b);
+
+        /* T[C] = raw / 340 + 36.53 */
+        snprintf(b, sizeof(b), "%.2f C", g_dev->Imu.getTemperature() / 340.0f + 36.53f);
+        setValue(g_sensors.ITemp, b);
+
+        /* getDeviceID() is a uint8_t (WHO_AM_I). */
+        snprintf(b, sizeof(b), "0x%02X", (unsigned)g_dev->Imu.getDeviceID());
+        setValue(g_sensors.DevID, b);
+    } else {
+        setValue(g_sensors.Ax, "--");
+        setValue(g_sensors.Ay, "--");
+        setValue(g_sensors.Az, "--");
+        setValue(g_sensors.Rx, "--");
+        setValue(g_sensors.Ry, "--");
+        setValue(g_sensors.Rz, "--");
+        setValue(g_sensors.ITemp, "--");
+        setValue(g_sensors.DevID, "--");
+    }
+
+    /* ---------------- BMP280 ------------------------------------------- */
+    if (g_dev->Env.isReady()) {
+        const float tempC = g_dev->Env.getTemperature();
+        const float pressurePa = g_dev->Env.readPressure();   /* Pa */
+
+        snprintf(b, sizeof(b), "%.2f C", tempC);
+        setValue(g_sensors.BTemp, b);
+        /* getPressure() returns Pa; the page shows hPa. */
+        snprintf(b, sizeof(b), "%.2f hPa", pressurePa / 100.0f);
+        setValue(g_sensors.BPressure, b);
+        /* calcAltitude() takes the measured pressure in Pa and returns m. */
+        snprintf(b, sizeof(b), "%.1f m", g_dev->Env.calcAltitude(pressurePa));
+        setValue(g_sensors.BAltitude, b);
+    } else {
+        setValue(g_sensors.BTemp, "--");
+        setValue(g_sensors.BPressure, "--");
+        setValue(g_sensors.BAltitude, "--");
+    }
 }
 
 static lv_obj_t *buildSensors(lv_obj_t *parent)
@@ -2373,30 +2498,25 @@ static lv_obj_t *buildSensors(lv_obj_t *parent)
     lv_obj_t *root = shell(parent, Sensors);
     lv_obj_t *page = STheme::page(root);
 
+    /* The BMM150 is initialised once by CHAPPIE::init() (Mag.init()); this
+     * page only reads it and shows the state the driver reports. */
     section(page, "BMM150");
     g_sensors.Mstatus = infoRow(page, "Status", "--").value;
+    g_sensors.Maddr = infoRow(page, "I2C address", "--").value;
     g_sensors.Mx = infoRow(page, "Magnetic X", "--").value;
     g_sensors.My = infoRow(page, "Magnetic Y", "--").value;
     g_sensors.Mz = infoRow(page, "Magnetic Z", "--").value;
 
     section(page, "MPU6050");
-     /* Temperature */
-    section(page, "Temperature (°C)");
     g_sensors.ITemp = infoRow(page, "Temperature", "--").value;
-    /* Device ID */
-    section(page, "Device ID");
-    g_sensors.DevID = infoRow(page, "Device ID", "--").value;
-    /*Acceleration*/
-    section(page, "Acceleration(g)");
+    g_sensors.DevID = infoRow(page, "WHO_AM_I", "--").value;
     g_sensors.Ax = infoRow(page, "Acceleration X", "--").value;
     g_sensors.Ay = infoRow(page, "Acceleration Y", "--").value;
     g_sensors.Az = infoRow(page, "Acceleration Z", "--").value;
-    /* Rotation */
-    section(page, "Angular Velocity (deg/s)");
-    g_sensors.Rx = infoRow(page, "Angular Velocity X", "--").value;
-    g_sensors.Ry = infoRow(page, "Angular Velocity Y", "--").value;
-    g_sensors.Rz = infoRow(page, "Angular Velocity Z", "--").value;
-    /* BMP280 */
+    g_sensors.Rx = infoRow(page, "Angular velocity X", "--").value;
+    g_sensors.Ry = infoRow(page, "Angular velocity Y", "--").value;
+    g_sensors.Rz = infoRow(page, "Angular velocity Z", "--").value;
+
     section(page, "BMP280");
     g_sensors.BTemp = infoRow(page, "Temperature", "--").value;
     g_sensors.BPressure = infoRow(page, "Pressure", "--").value;
@@ -2412,6 +2532,8 @@ static lv_obj_t *buildSensors(lv_obj_t *parent)
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, LV_PCT(100));
     lv_obj_set_style_text_color(note, ST_MUTED, 0);
+    lv_obj_set_style_text_font(note, fontSmall(), 0);
+    lv_obj_set_style_pad_left(note, 4, 0);
 
 
     refresh_sensors();

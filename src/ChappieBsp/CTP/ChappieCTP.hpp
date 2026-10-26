@@ -230,6 +230,12 @@ class ChappieCTP {
          * 
          * @param wire 
          */
+
+         inline bool initTP()
+        {
+            init(&Wire);
+            return true;
+        }
         inline void init(TwoWire* wire)
         {
             _I2C_init(wire, CTP_DEV_ADDR);

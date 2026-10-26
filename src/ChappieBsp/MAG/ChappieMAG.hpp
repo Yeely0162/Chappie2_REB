@@ -32,9 +32,10 @@
 /**
  * @brief BMM150 driver on the shared I2C bus
  *
- * CHAPPIE::init() does not touch this sensor. Apps that need the magnetometer
- * call CHAPPIE::initMag() (or init(&Wire)) on demand, so an unused sensor
- * produces no I2C traffic and no serial output at boot.
+ * The bus itself is owned by CHAPPIE (Wire.begin/setClock in CHAPPIE::init());
+ * this driver only binds to that already-initialised TwoWire. CHAPPIE::init()
+ * initialises it once at boot with Mag.init(), and the compass and the Settings
+ * sensor page reuse the same instance instead of re-initialising it.
  */
 class ChappieMAG {
     public:
@@ -54,6 +55,20 @@ class ChappieMAG {
 
         ChappieMAG() : _wire(NULL), _dev_addr(MAG_DEV_ADDR), _status(STATUS_NOT_INIT) {}
         ~ChappieMAG() {}
+
+        /**
+         * @brief Init on the shared I2C bus of the project
+         *
+         * This is the normal entry point: CHAPPIE::init() calls it once during
+         * start-up, the same way Imu.init()/Env.init() are called. The bus is
+         * bound here (not in the constructor) so the object can stay a plain
+         * member of CHAPPIE, and it is *not* re-opened: Wire.begin()/setClock()
+         * stay owned by CHAPPIE::init().
+         */
+        inline bool init()
+        {
+            return init(&Wire, MAG_DEV_ADDR);
+        }
 
         /**
          * @brief Probe and init BMM150 on the shared I2C bus

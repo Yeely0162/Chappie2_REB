@@ -76,14 +76,14 @@ void CHAPPIE::init()
 {
     /* One mutex for every multi-step I2C transaction on the shared bus.
      * Static allocation cannot fail at runtime. */
-    if (g_chappie_i2c_mutex == NULL) {
-        g_chappie_i2c_mutex = xSemaphoreCreateMutexStatic(&g_chappie_i2c_mutex_buffer);
-        if (g_chappie_i2c_mutex == NULL) {
-            printf("[I2C] mutex create failed\n");
-            while (1)
-                delay(1000);
-        }
-    }
+    // if (g_chappie_i2c_mutex == NULL) {
+    //     g_chappie_i2c_mutex = xSemaphoreCreateMutexStatic(&g_chappie_i2c_mutex_buffer);
+    //     if (g_chappie_i2c_mutex == NULL) {
+    //         printf("[I2C] mutex create failed\n");
+    //         while (1)
+    //             delay(1000);
+    //     }
+    // }
 
     /* Init I2C */
     Wire.begin(5, 4);
@@ -114,7 +114,7 @@ void CHAPPIE::init()
     Lcd.printf(" Project: %s\n", EMMA_PROJECT_NAME);
     // Lcd.printf(" IIC Num: %d\n", num);
     // delay(50);
-    Tp.init(&Wire);
+    Tp.initTP();
 
     /* Init touchpad */
     Lcd.printf("%s", Cowsay("Pls touch screen to wakeup Tp").c_str());
@@ -128,9 +128,8 @@ void CHAPPIE::init()
     Imu.init();
     /* Init SD card */
     Sd.init();
-    /* BMM150 is initialised on demand: the compass and the Settings sensor
-     * page call CHAPPIE::initMag(), which probes the chip once. Keeping it out
-     * of boot means no I2C traffic and no error log when the sensor is absent. */
+    /* Init MAG */
+    Mag.init();
     /* Init BMP280 */
     Env.init();
     
