@@ -23,7 +23,6 @@
 #include "../../../ChappieBsp/Chappie.h"
 
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
 #include <Preferences.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
@@ -40,10 +39,17 @@ namespace Sy {
 #define SY_NVS_PASS     "pass"
 #define SY_NVS_HTTPS    "https"
 
-/* Request timing. Kept short so the worker can be stopped quickly and so a
- * dead NAS never stalls a poll for long. */
-#define SY_HTTP_CONNECT_MS  2000
-#define SY_HTTP_READ_MS     3000
+/* Request timing. Measured on the reference NAS (DSM 7.3): every API answers
+ * in 85-250 ms except SYNO.Core.System.Utilization, which needs ~1.1-1.3 s.
+ * The reply deadline therefore has to stay well above that, while a dead NAS
+ * must not block the worker for long. */
+#define SY_CONNECT_MS   4000
+#define SY_REPLY_MS     6000
+#define SY_MAX_BODY     32768
+
+/* One request at a time: the worker is the only caller today, but a second
+ * path (connection test) must never share a socket. */
+static SemaphoreHandle_t s_httpMtx = nullptr;
 
 /* Poll cadence. The task asked for a 2-3 s refresh of the data that is on
  * screen and a slower cadence for everything else. */
@@ -100,6 +106,8 @@ static volatile uint32_t s_stopGen = 0;
 static struct {
     String   sid;
     bool     valid;
+    uint32_t since;         /* epoch seconds when this session was accepted */
+    uint32_t sinceMs;       /* millis() at the same moment */
 } s_sess;
 static int s_lastHttp = 0;      /* HTTP status of the last failed request */
 
@@ -368,7 +376,7 @@ static void postCommand(uint32_t bits)
 /* --------------------------------------------------------------- config */
 static void cfgDefaults(Config &c)
 {
-    c.host = "192.168.1.1";
+    c.host = "";
     c.port = 5000;
     c.user = "";
     c.pass = "";
@@ -453,13 +461,16 @@ void CfgLoad()
     Config c;
     cfgDefaults(c);
 
+    /* First boot has no keys; Preferences::getString() logs an error for a
+     * missing key even when a default is supplied, so check isKey() first and
+     * leave everything empty instead of asking for a login with "" host. */
     Preferences p;
     if (p.begin(SY_NVS_NS, true)) {
-        c.host  = p.getString(SY_NVS_HOST, "");
-        c.user  = p.getString(SY_NVS_USER, "");
-        c.pass  = p.getString(SY_NVS_PASS, "");
-        c.port  = p.getUShort(SY_NVS_PORT, 5000);
-        c.https = p.getBool(SY_NVS_HTTPS, false);
+        if (p.isKey(SY_NVS_HOST))  c.host  = p.getString(SY_NVS_HOST, "");
+        if (p.isKey(SY_NVS_USER))  c.user  = p.getString(SY_NVS_USER, "");
+        if (p.isKey(SY_NVS_PASS))  c.pass  = p.getString(SY_NVS_PASS, "");
+        if (p.isKey(SY_NVS_PORT))  c.port  = p.getUShort(SY_NVS_PORT, 5000);
+        if (p.isKey(SY_NVS_HTTPS)) c.https = p.getBool(SY_NVS_HTTPS, false);
         p.end();
     }
     c.host.trim();
@@ -524,6 +535,107 @@ void CfgClear()
 }
 
 /* ----------------------------------------------------------------- HTTP */
+/* ------------------------------------------------------------- sockets
+ *
+ * HTTPClient is deliberately not used here. On this NAS nginx answers with
+ * "Connection: close", and HTTPClient's teardown then hits
+ *   [E][WiFiClient.cpp] flush(): fail on fd n, errno 128 "Socket is not connected"
+ * while a slow request raises "error(-11): read Timeout" from inside its
+ * header parser. Both come from HTTPClient's own socket handling, not from
+ * the data. This implementation owns the socket: one deadline for the whole
+ * reply, no keep-alive, no flush(), stop() only.
+ */
+
+/* Non-blocking wait for data with a deadline (millis based, wrap safe). */
+static bool sockWait(WiFiClient *cli, uint32_t deadline)
+{
+    while ((int32_t)(millis() - deadline) < 0) {
+        if (cli->available() > 0) return true;
+        if (!cli->connected()) return cli->available() > 0;
+        vTaskDelay(pdMS_TO_TICKS(4));
+    }
+    return cli->available() > 0;
+}
+
+static bool readLine(WiFiClient *cli, String &line, uint32_t deadline)
+{
+    line = "";
+    while (sockWait(cli, deadline)) {
+        int c = cli->read();
+        if (c < 0) continue;
+        if (c == '\n') {
+            int n = (int)line.length();
+            if (n > 0 && line[n - 1] == '\r') line.remove(n - 1);
+            return true;
+        }
+        if (line.length() < 400) line += (char)c;
+    }
+    return false;
+}
+
+static bool readExact(WiFiClient *cli, uint32_t len, String &out, uint32_t deadline)
+{
+    while (len > 0) {
+        if (out.length() >= SY_MAX_BODY) return false;
+        if (!sockWait(cli, deadline)) return false;
+
+        uint8_t buf[256];
+        size_t want = len < sizeof(buf) ? len : sizeof(buf);
+        int n = cli->read(buf, want);
+        if (n <= 0) continue;
+
+        out.concat((const char *)buf, (unsigned)n);
+        len -= (uint32_t)n;
+    }
+    return true;
+}
+
+static bool readChunked(WiFiClient *cli, String &out, uint32_t deadline)
+{
+    for (;;) {
+        String line;
+        if (!readLine(cli, line, deadline)) return false;
+
+        long size = strtol(line.c_str(), nullptr, 16);
+        if (size <= 0) {
+            /* last chunk: swallow the trailer headers */
+            while (readLine(cli, line, deadline) && line.length() > 0) { }
+            return true;
+        }
+        if (!readExact(cli, (uint32_t)size, out, deadline)) return false;
+        readLine(cli, line, deadline);      /* CRLF that ends the chunk */
+    }
+}
+
+static bool readUntilClose(WiFiClient *cli, String &out, uint32_t deadline)
+{
+    for (;;) {
+        if (out.length() >= SY_MAX_BODY) return false;
+
+        int c = cli->read();
+        if (c >= 0) {
+            out += (char)c;
+            continue;
+        }
+        if (!cli->connected()) return true;
+        if ((int32_t)(millis() - deadline) >= 0) return false;
+        vTaskDelay(pdMS_TO_TICKS(4));
+    }
+}
+
+struct HttpGuard {
+    bool held;
+    HttpGuard()
+    {
+        held = (s_httpMtx &&
+                xSemaphoreTake(s_httpMtx, pdMS_TO_TICKS(2500)) == pdTRUE);
+    }
+    ~HttpGuard()
+    {
+        if (held) xSemaphoreGive(s_httpMtx);
+    }
+};
+
 static bool httpFetch(const String &pathQuery, const String &postBody, String &body, int &httpCode)
 {
     body = "";
@@ -533,74 +645,151 @@ static bool httpFetch(const String &pathQuery, const String &postBody, String &b
     CfgGet(c);
     if (!c.configured()) return false;
 
-    String url = c.https ? "https://" : "http://";
-    url += c.host;
-    url += ':';
-    url += String((unsigned)c.port);
-    url += pathQuery;
+    HttpGuard guard;
+    if (!guard.held) return false;
 
     WiFiClient plain;
     WiFiClientSecure tls;
     WiFiClient *cli = &plain;
+    bool connected = false;
 
+    /* connect() is called on the concrete object: the timeout overload is not
+     * part of the Client interface, so a call through the base pointer could
+     * pick the plain-TCP implementation for an https:// URL. Reads and writes
+     * below go through the base pointer, which is virtual and dispatches
+     * correctly. */
     if (c.https) {
-        /* The board has no way to store a CA for a private NAS certificate.
-         * TLS still protects the credentials on the wire, but the peer is not
-         * authenticated. The UI says so explicitly. */
+        /* The board cannot store a CA for a private NAS certificate. TLS still
+         * protects the credentials on the wire, but the peer is not
+         * authenticated; the UI says so explicitly. */
         tls.setInsecure();
+        connected = (tls.connect(c.host.c_str(), c.port, SY_CONNECT_MS) == 1);
         cli = &tls;
+    } else {
+        connected = (plain.connect(c.host.c_str(), c.port, SY_CONNECT_MS) == 1);
     }
 
-    HTTPClient http;
-    http.setConnectTimeout(SY_HTTP_CONNECT_MS);
-    http.setTimeout(SY_HTTP_READ_MS);
-    http.setReuse(false);
+    if (!connected) {
+        cli->stop();
+        return false;               /* refused / no route / handshake failed */
+    }
 
-    if (!http.begin(*cli, url)) {
-        httpCode = 0;
+    const bool post = postBody.length() > 0;
+    String req;
+    req.reserve(256 + postBody.length());
+    req += post ? "POST " : "GET ";
+    req += pathQuery;
+    req += " HTTP/1.1\r\nHost: ";
+    req += c.host;
+    req += ':';
+    req += String((unsigned)c.port);
+    req += "\r\nUser-Agent: Chappie2-Synology\r\n";
+    req += "Accept: application/json\r\n";
+    req += "Connection: close\r\n";        /* nginx closes anyway */
+    if (post) {
+        req += "Content-Type: application/x-www-form-urlencoded\r\n";
+        req += "Content-Length: ";
+        req += String((unsigned)postBody.length());
+        req += "\r\n";
+    }
+    req += "\r\n";
+    if (post) req += postBody;
+
+    size_t sent = cli->write((const uint8_t *)req.c_str(), req.length());
+    if (sent != req.length()) {
+        cli->stop();
         return false;
     }
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    httpCode = postBody.length() ? http.POST(postBody) : http.GET();
-    if (httpCode == HTTP_CODE_OK) body = http.getString();
-    http.end();
 
-    return httpCode == HTTP_CODE_OK;
+    uint32_t deadline = millis() + SY_REPLY_MS;
+
+    String status;
+    if (!readLine(cli, status, deadline)) {
+        cli->stop();
+        return false;               /* no answer inside the deadline */
+    }
+    if (status.startsWith("HTTP/")) {
+        int sp = status.indexOf(' ');
+        if (sp > 0) httpCode = status.substring(sp + 1).toInt();
+    }
+    if (httpCode <= 0) {
+        cli->stop();
+        return false;
+    }
+
+    long contentLen = -1;
+    bool chunked = false;
+    for (int i = 0; i < 40; i++) {
+        String h;
+        if (!readLine(cli, h, deadline)) {
+            cli->stop();
+            return false;
+        }
+        if (h.length() == 0) break;
+
+        String hl = h;
+        hl.toLowerCase();
+        if (hl.startsWith("content-length:")) {
+            contentLen = hl.substring(15).toInt();
+        } else if (hl.startsWith("transfer-encoding:") && hl.indexOf("chunked") >= 0) {
+            chunked = true;
+        }
+    }
+
+    bool ok = false;
+    if (httpCode == 200) {
+        if (chunked) ok = readChunked(cli, body, deadline);
+        else if (contentLen >= 0) ok = readExact(cli, (uint32_t)contentLen, body, deadline);
+        else ok = readUntilClose(cli, body, deadline);
+    }
+
+    cli->stop();
+    return ok && httpCode == 200;
 }
 
 /* 0 on success, positive DSM error code, negative transport/parse error. */
 static int apiCall(const String &pathQuery, const String &postBody, DynamicJsonDocument &doc)
 {
-    String body;
     int httpCode = 0;
-    if (!httpFetch(pathQuery, postBody, body, httpCode)) {
-        /* A real HTTP error is reported as such; anything else (no route,
-         * TLS failure, timeout) is a transport error. */
-        if (httpCode >= 400) {
-            s_lastHttp = httpCode;
-            return ERR_HTTP;
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+        uint32_t t0 = millis();
+        String body;
+        if (!httpFetch(pathQuery, postBody, body, httpCode)) {
+            /* A real HTTP error is reported as such; anything else (no route,
+             * TLS failure, timeout) is a transport error. */
+            if (httpCode >= 400) {
+                s_lastHttp = httpCode;
+                return ERR_HTTP;
+            }
+            /* One retry on a fresh socket, but only for a quick failure: a
+             * full timeout would just double the dead-NAS delay. */
+            if (attempt == 0 && (millis() - t0) < 3000) {
+                vTaskDelay(pdMS_TO_TICKS(120));
+                continue;
+            }
+            return ERR_NET;
         }
-        return ERR_NET;
-    }
 
-    /* DSM answers with a JSON object on this CGI path. Anything else (an HTML
-     * portal, a reverse proxy error page, a captive portal) is not parsed as
-     * JSON; the caller gets a distinct code so the UI can say what happened. */
-    const char *p = body.c_str();
-    while (*p == ' ' || *p == '\r' || *p == '\n' || *p == '\t') p++;
-    if (*p != '{') {
-        s_lastHttp = httpCode;
-        return ERR_NOTJSON;
-    }
+        /* DSM answers with a JSON object on this CGI path. Anything else (an
+         * HTML portal, a proxy error page) is not parsed as JSON. */
+        const char *p = body.c_str();
+        while (*p == ' ' || *p == '\r' || *p == '\n' || *p == '\t') p++;
+        if (*p != '{') {
+            s_lastHttp = httpCode;
+            return ERR_NOTJSON;
+        }
 
-    DeserializationError err = deserializeJson(doc, p);
-    if (err) return ERR_JSON;
+        DeserializationError err = deserializeJson(doc, p);
+        if (err) return ERR_JSON;
 
-    if (!doc["success"].as<bool>()) {
-        int code = doc["error"]["code"] | 0;
-        return code > 0 ? code : ERR_SHAPE;
+        if (!doc["success"].as<bool>()) {
+            int code = doc["error"]["code"] | 0;
+            return code > 0 ? code : ERR_SHAPE;
+        }
+        return 0;
     }
-    return 0;
+    return ERR_NET;
 }
 
 static String apiPath(const ApiEntry &e)
@@ -615,12 +804,32 @@ static String withSid(String query)
     return query;
 }
 
+/* One line per failing API, at most every 30 s for the same code: enough to
+ * tell from the serial log which request went wrong without flooding. */
+static void logApiError(const char *what, int rc)
+{
+    static uint32_t lastMs = 0;
+    static int lastRc = 0;
+    static const char *lastWhat = "";
+
+    uint32_t now = millis();
+    if (rc == lastRc && what == lastWhat && (now - lastMs) < 30000) return;
+    lastMs = now;
+    lastRc = rc;
+    lastWhat = what;
+    printf("[Syno] %s failed rc=%d\n", what, rc);
+}
+
 /* -------------------------------------------------------------- publish */
 static void publishConn(ConnState st, const char *msg)
 {
     if (!DataLock(50)) return;
     s_data.conn = st;
     if (msg) setStr(s_data.msg, sizeof(s_data.msg), msg);
+    if (st == CONN_ONLINE) {
+        s_data.sessSince = s_sess.since;
+        s_data.sessSinceMs = s_sess.sinceMs;
+    }
 
     /* Keep the last measured rate (it is still a real number) but mark it as
      * no longer live, so the UI can grey it out instead of pretending the NAS
@@ -737,6 +946,13 @@ static int fetchUtilization()
     JsonObject d = doc["data"].as<JsonObject>();
     if (d.isNull()) return ERR_SHAPE;
 
+    /* Calibration (verified against this NAS, DSM 7.3, DS718+ / 4 cores):
+     * user_load, system_load and other_load are percentages of the whole CPU
+     * and are additive; user+system+other tracked the independent
+     * Virtualization.Cluster "cpu_usage" within a few points on every sample
+     * (27 vs 25, 31 vs 29, ...). The DSM web UI polls on its own schedule, so
+     * comparing the two screens at different instants always shows a small
+     * difference - no offset is applied here on purpose. */
     int cpu = -1;
     JsonObject cpuObj = d["cpu"].as<JsonObject>();
     if (!cpuObj.isNull()) {
@@ -747,6 +963,8 @@ static int fetchUtilization()
         if (uOk && sOk) cpu = u + sy + (oOk && ot > 0 ? ot : 0);
     }
 
+    /* real_usage is the used-memory percentage (58-59 on this NAS, matching
+     * VMM's ram_usage). It is used as-is, never multiplied or inverted. */
     bool ramOk = false;
     int ram = jsonInt(d["memory"]["real_usage"], ramOk);
     if (!ramOk) ram = -1;
@@ -1229,6 +1447,8 @@ static bool doLogin(const Config &c, int &err)
     }
     s_sess.sid = sid;
     s_sess.valid = true;
+    s_sess.since = (uint32_t)time(nullptr);
+    s_sess.sinceMs = millis();
     return true;
 }
 
@@ -1467,9 +1687,14 @@ static void netTask(void *arg)
             }
         }
 
+        /* The overview shows CPU/RAM/network too, so it polls as fast as the
+         * home page; storage/system/UPS pages refresh the slow data sooner. */
         uint8_t page = s_page;
-        uint32_t fastIv = (page == PAGE_HOME) ? SY_FAST_ACTIVE_MS : SY_FAST_IDLE_MS;
-        uint32_t slowIv = (page == PAGE_HOME) ? SY_SLOW_HOME_MS : SY_SLOW_ACTIVE_MS;
+        bool fastPage = (page == PAGE_HOME || page == PAGE_OVERVIEW);
+        bool slowPage = (page == PAGE_OVERVIEW || page == PAGE_STORAGE ||
+                         page == PAGE_SYSTEM || page == PAGE_UPS);
+        uint32_t fastIv = fastPage ? SY_FAST_ACTIVE_MS : SY_FAST_IDLE_MS;
+        uint32_t slowIv = slowPage ? SY_SLOW_ACTIVE_MS : SY_SLOW_HOME_MS;
 
         if (firstRun || (cmds & CMD_FAST) || (millis() - lastFast >= fastIv)) {
             int rc = fetchFast();
@@ -1483,6 +1708,7 @@ static void netTask(void *arg)
                 vTaskDelay(pdMS_TO_TICKS(200));
                 continue;
             }
+            if (rc && rc != 102 && rc != 119) logApiError("utilization", rc);
             if (rc == 102) {
                 if (DataLock(30)) {
                     setStr(s_data.msg, sizeof(s_data.msg), "CPU/RAM API not available");
@@ -1503,10 +1729,26 @@ static void netTask(void *arg)
 
         if (firstRun || (cmds & CMD_SLOW) || (millis() - lastSlow >= slowIv)) {
             bool expired = false;
-            if (fetchSystemInfo() == 119) expired = true;
-            if (!expired && fetchNetworkInfo() == 119) expired = true;
-            if (!expired && fetchStorage() == 119) expired = true;
-            if (!expired && fetchUps() == 119) expired = true;
+            int src = 0;
+            src = fetchSystemInfo();
+            if (src == 119) expired = true;
+            else if (src) logApiError("system.info", src);
+
+            if (!expired) {
+                src = fetchNetworkInfo();
+                if (src == 119) expired = true;
+                else if (src) logApiError("system.network", src);
+            }
+            if (!expired) {
+                src = fetchStorage();
+                if (src == 119) expired = true;
+                else if (src) logApiError("system.storage", src);
+            }
+            if (!expired) {
+                src = fetchUps();
+                if (src == 119) expired = true;
+                else if (src) logApiError("ups", src);
+            }
 
             if (expired) {
                 s_sess.valid = false;
@@ -1533,7 +1775,8 @@ static void netTask(void *arg)
 void NetStart(void *bsp)
 {
     if (!s_mtx) s_mtx = xSemaphoreCreateMutex();
-    if (!s_mtx) {
+    if (!s_httpMtx) s_httpMtx = xSemaphoreCreateMutex();
+    if (!s_mtx || !s_httpMtx) {
         printf("[Syno] cannot create mutex\n");
         return;
     }

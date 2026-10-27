@@ -23,6 +23,7 @@ namespace Sy {
 /* ------------------------------------------------------------------ pages */
 enum PageId : uint8_t {
     PAGE_HOME = 0,
+    PAGE_OVERVIEW,      /* swipe up on the home page */
     PAGE_SETTINGS,
     PAGE_STORAGE,
     PAGE_SYSTEM,
@@ -130,6 +131,10 @@ struct Snapshot {
     uint32_t  lastFastMs;
     uint32_t  lastSlowMs;
     bool      hasData;
+
+    /* session bookkeeping for the overview page */
+    uint32_t  sessSince;     /* epoch (s) when this DSM login was accepted, 0 = unknown */
+    uint32_t  sessSinceMs;   /* millis() at the same moment (always valid) */
 
     /* settings "Test connection" result, driven by the worker */
     uint8_t   testState;     /* 0 idle, 1 running, 2 ok, 3 fail */

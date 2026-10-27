@@ -1,14 +1,13 @@
 /**
  * @file SyUi.cpp
- * @brief Synology monitor: pages, gesture navigation and refresh timer.
+ * @brief Synology monitor: pages, gestures, session page and on-screen keyboard.
  *
- * Pages: Home, Settings, Storage, System, UPS.
- * Gestures: down = Settings, left = Storage, right = System, up = Home.
- *
- * The CPU and RAM meters on the home page are the protected part of the app.
- * ArcCreate() and Content_Update() below are the original implementations and
- * are used exactly as before: same size, position, ticks, colours, animation
- * and centre label. Only the network block underneath them was rebuilt.
+ * Pages are created on first use and destroyed when leaving them (except the
+ * home page, which owns the protected CPU/RAM meters). This board runs LVGL
+ * with its default 48 KB pool, so keeping six screens alive at once - and
+ * building a ~70 object keyboard on every field tap - exhausted lv_mem and
+ * aborted in LV_ASSERT_MALLOC. The keyboard is now a single canvas object
+ * that draws its own keys and hit-tests touches.
  */
 #include "SyCommon.h"
 
@@ -16,12 +15,14 @@
 #include "../../Resource/ResourcePool.h"
 
 #include <string.h>
+#include <ctype.h>
+#include <time.h>
 
 namespace Sy {
 
 /* ---------------------------------------------------------------- palette */
-#define SY_BG        lv_color_hex(0x000000)   /* home keeps the original look */
-#define SY_DARK      lv_color_hex(0x0A0C0F)   /* sub pages */
+#define SY_BG        lv_color_hex(0x000000)
+#define SY_DARK      lv_color_hex(0x0A0C0F)
 #define SY_PANEL     lv_color_hex(0x121519)
 #define SY_PANEL_HI  lv_color_hex(0x181D23)
 #define SY_LINE      lv_color_hex(0x1E2329)
@@ -30,18 +31,18 @@ namespace Sy {
 #define SY_TEAL      lv_color_hex(0x18C7A8)
 #define SY_AMBER     lv_color_hex(0xFFB02E)
 #define SY_RED       lv_color_hex(0xE5484D)
-#define SY_GREEN     lv_color_hex(0x53DE77)
 
 #define SY_W 280
 #define SY_H 240
 
-#define SY_CHART_POINTS 48
+/* Every page keeps its content 10 px away from the screen edges. */
+#define SY_PAD 10
+#define SY_CONTENT_W (SY_W - 2 * SY_PAD)     /* 260 */
+#define SY_BODY_Y 40                         /* first row below the 34 px bar */
+#define SY_BODY_BOTTOM (SY_H - SY_PAD)       /* 230 */
 
 /* ---------------------------------------------------------------- fonts */
-static const lv_font_t *fSmall()
-{
-    return &lv_font_montserrat_12;
-}
+static const lv_font_t *fSmall()  { return &lv_font_montserrat_12; }
 static const lv_font_t *fText()
 {
     lv_font_t *f = ResourcePool::GetFont("bahnschrift_13");
@@ -57,6 +58,13 @@ static const lv_font_t *fBold18()
     lv_font_t *f = ResourcePool::GetFont("UbuntuBold18");
     return f ? f : &lv_font_montserrat_12;
 }
+static const lv_font_t *fHuge()
+{
+    lv_font_t *f = ResourcePool::GetFont("MontserratBold48");
+    return f ? f : &lv_font_montserrat_14;
+}
+/* LV_SYMBOL_* only exists in the built-in font; the project fonts are ASCII. */
+static const lv_font_t *fSymbol() { return &lv_font_montserrat_14; }
 
 /* ================================================================ meters */
 /* ---- original code, unchanged: do not redesign these two meters ---- */
@@ -134,14 +142,69 @@ static void Content_Update(MeterInfo *meterobj, int16_t value, bool check)
     meterobj->Meter_val_old = value;
 }
 
+/* =============================================================== styles */
+static lv_style_t st_card;      /* rounded panel */
+static lv_style_t st_card_flat; /* square panel */
+static lv_style_t st_btn;
+static lv_style_t st_btn_press;
+static bool st_ready = false;
+
+static void stylesInit()
+{
+    if (st_ready) return;
+
+    lv_style_init(&st_card);
+    lv_style_set_bg_opa(&st_card, LV_OPA_COVER);
+    lv_style_set_bg_color(&st_card, SY_PANEL);
+    lv_style_set_border_width(&st_card, 0);
+    lv_style_set_radius(&st_card, 8);
+    lv_style_set_pad_all(&st_card, 0);
+
+    lv_style_init(&st_card_flat);
+    lv_style_set_bg_opa(&st_card_flat, LV_OPA_COVER);
+    lv_style_set_bg_color(&st_card_flat, SY_DARK);
+    lv_style_set_border_width(&st_card_flat, 0);
+    lv_style_set_radius(&st_card_flat, 0);
+    lv_style_set_pad_all(&st_card_flat, 0);
+
+    lv_style_init(&st_btn);
+    lv_style_set_bg_opa(&st_btn, LV_OPA_COVER);
+    lv_style_set_bg_color(&st_btn, SY_PANEL_HI);
+    lv_style_set_border_width(&st_btn, 0);
+    lv_style_set_shadow_width(&st_btn, 0);
+    lv_style_set_radius(&st_btn, 6);
+    lv_style_set_pad_all(&st_btn, 0);
+
+    lv_style_init(&st_btn_press);
+    lv_style_set_bg_color(&st_btn_press, SY_PANEL);
+
+    st_ready = true;
+}
+
 /* =============================================================== helpers */
 static lv_obj_t *s_scr[PAGE_MAX];
 static PageId    s_cur = PAGE_HOME;
 static uint32_t  s_navBlockUntil = 0;
 static CHAPPIE  *s_dev = nullptr;
 
+static double s_peakDown = 0.0;
+static double s_peakUp = 0.0;
+
 static void gesture_cb(lv_event_t *e);
 static void updateHome(const Snapshot &s, bool force);
+static void buildPage(PageId page);
+static bool ensurePage(PageId page);
+
+/* LVGL keeps its own pool (LV_MEM_SIZE, 48 KB by default on this build).
+ * Logging the watermark makes a future exhaustion visible before it aborts. */
+static void logLvMem(const char *tag)
+{
+    lv_mem_monitor_t mon;
+    lv_mem_monitor(&mon);
+    printf("[Syno] lv_mem %s: %u/%u used, max %u, frag %u%%\n", tag,
+           (unsigned)(mon.total_size - mon.free_size), (unsigned)mon.total_size,
+           (unsigned)mon.max_used, (unsigned)mon.frag_pct);
+}
 
 static void setTextIfChanged(lv_obj_t *label, const char *text)
 {
@@ -168,12 +231,9 @@ static lv_obj_t *mkButton(lv_obj_t *parent, const char *text, lv_coord_t x, lv_c
     lv_obj_t *b = lv_btn_create(parent);
     lv_obj_set_pos(b, x, y);
     lv_obj_set_size(b, w, h);
+    lv_obj_add_style(b, &st_btn, 0);
+    lv_obj_add_style(b, &st_btn_press, LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(b, bg, 0);
-    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(b, 8, 0);
-    lv_obj_set_style_shadow_width(b, 0, 0);
-    lv_obj_set_style_border_width(b, 0, 0);
-    lv_obj_set_style_pad_all(b, 0, 0);
     if (cb) lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, user);
 
     lv_obj_t *l = lv_label_create(b);
@@ -190,11 +250,9 @@ static lv_obj_t *mkPanel(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
     lv_obj_t *p = lv_obj_create(parent);
     lv_obj_set_pos(p, x, y);
     lv_obj_set_size(p, w, h);
+    lv_obj_add_style(p, radius > 0 ? &st_card : &st_card_flat, 0);
     lv_obj_set_style_bg_color(p, bg, 0);
-    lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(p, 0, 0);
-    lv_obj_set_style_radius(p, radius, 0);
-    lv_obj_set_style_pad_all(p, 0, 0);
+    if (radius > 0) lv_obj_set_style_radius(p, radius, 0);
     lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
     return p;
 }
@@ -217,59 +275,55 @@ static void homeBtn_cb(lv_event_t *e)
     UiNavigate(PAGE_HOME, true);
 }
 
-static lv_obj_t *pageHeader(lv_obj_t *scr, const char *title)
+/* Title bar: title and HOME button 10 px from the screen edges. */
+static void pageHeader(lv_obj_t *scr, const char *title)
 {
-    lv_obj_t *bar = mkPanel(scr, 0, 0, SY_W, 26, SY_DARK, 0);
-    mkLabel(bar, title, 8, 3, fValue(), SY_TEXT, nullptr);
-
-    lv_obj_t *home = mkButton(bar, "HOME", 224, 3, 50, 20, SY_PANEL_HI, SY_MUTED, homeBtn_cb, nullptr);
-    (void)home;
-    return bar;
+    lv_obj_t *bar = mkPanel(scr, 0, 0, SY_W, 34, SY_DARK, 0);
+    mkLabel(bar, title, SY_PAD, 10, fValue(), SY_TEXT, nullptr);
+    mkButton(bar, "HOME", 220, 10, 50, 20, SY_PANEL, SY_MUTED, homeBtn_cb, nullptr);
 }
 
 /* --------------------------------------------------------- formatting */
 static void fmtBytes(uint64_t bytes, char *out, size_t n)
 {
-    const double kb = 1024.0;
-    const double mb = kb * 1024.0;
-    const double gb = mb * 1024.0;
-    const double tb = gb * 1024.0;
-
+    const double kb = 1024.0, mb = kb * 1024.0, gb = mb * 1024.0, tb = gb * 1024.0;
     if (bytes >= (uint64_t)tb)      snprintf(out, n, "%.2f TB", bytes / tb);
     else if (bytes >= (uint64_t)gb) snprintf(out, n, "%.1f GB", bytes / gb);
     else if (bytes >= (uint64_t)mb) snprintf(out, n, "%.0f MB", bytes / mb);
     else                            snprintf(out, n, "%.0f KB", bytes / kb);
 }
 
-static void fmtRate(float bps, char *num, size_t nNum, const char **unit)
+static void fmtSpeed(double bps, char *out, size_t n)
 {
-    if (!(bps >= 0.0f)) bps = 0.0f;
-    if (bps < 1024.0f) {
-        snprintf(num, nNum, "%.0f", bps);
-        *unit = "B/s";
-    } else if (bps < 1024.0f * 1024.0f) {
-        snprintf(num, nNum, "%.1f", bps / 1024.0f);
-        *unit = "KB/s";
-    } else if (bps < 1024.0f * 1024.0f * 1024.0f) {
-        snprintf(num, nNum, "%.2f", bps / (1024.0f * 1024.0f));
-        *unit = "MB/s";
-    } else {
-        snprintf(num, nNum, "%.2f", bps / (1024.0f * 1024.0f * 1024.0f));
-        *unit = "GB/s";
-    }
+    if (!(bps >= 0.0)) bps = 0.0;
+    if (bps < 1024.0)                        snprintf(out, n, "%.0f B/s", bps);
+    else if (bps < 1024.0 * 1024.0)          snprintf(out, n, "%.1f KB/s", bps / 1024.0);
+    else if (bps < 1024.0 * 1024.0 * 1024.0) snprintf(out, n, "%.1f MB/s", bps / (1024.0 * 1024.0));
+    else                                     snprintf(out, n, "%.2f GB/s", bps / (1024.0 * 1024.0 * 1024.0));
 }
 
 static void fmtUptime(const char *raw, char *out, size_t n)
 {
     out[0] = 0;
     if (!raw || !raw[0]) return;
-
     long h = 0, m = 0, sec = 0;
     if (sscanf(raw, "%ld:%ld:%ld", &h, &m, &sec) < 1) return;
     if (h < 0) h = 0;
-
     if (h >= 24) snprintf(out, n, "%ldd %ldh %ldm", h / 24, h % 24, m);
     else         snprintf(out, n, "%ldh %ldm", h, m);
+}
+
+/* Runtime in seconds -> "MM:SS" or "H:MM:SS" (never "hours" shown as minutes). */
+static void fmtRuntime(int32_t sec, char *out, size_t n)
+{
+    if (sec < 0) {
+        snprintf(out, n, "--");
+        return;
+    }
+    if (sec >= 3600)
+        snprintf(out, n, "%d:%02d:%02d", (int)(sec / 3600), (int)((sec / 60) % 60), (int)(sec % 60));
+    else
+        snprintf(out, n, "%02d:%02d", (int)(sec / 60), (int)(sec % 60));
 }
 
 static lv_color_t usageColor(int pct)
@@ -281,10 +335,8 @@ static lv_color_t usageColor(int pct)
 
 /* ============================================================ home page */
 static lv_obj_t *s_timeLabel;
-static lv_obj_t *s_dlVal, *s_dlUnit, *s_ulVal, *s_ulUnit;
-static lv_obj_t *s_netState, *s_axisLbl, *s_dot;
-static lv_obj_t *s_chart;
-static lv_chart_series_t *s_serDl, *s_serUl;
+static lv_obj_t *s_dlVal, *s_ulVal, *s_dlPeak, *s_ulPeak, *s_netState, *s_dot;
+static int16_t s_lastCpu = -1, s_lastRam = -1;
 
 static void buildHome()
 {
@@ -301,46 +353,26 @@ static void buildHome()
     lv_label_set_text(s_timeLabel, "Init...");
     lv_obj_set_style_text_color(s_timeLabel, lv_color_hex(0x8F8F8F), 0);
 
-    /* --- redesigned network block (below the meters, y >= 148) --- */
-    lv_obj_t *panel = mkPanel(scr, 6, 148, 268, 88, SY_PANEL, 12);
+    /* network block: 10 px from left, right and bottom edges */
+    lv_obj_t *panel = mkPanel(scr, SY_PAD, 150, SY_CONTENT_W, 80, SY_PANEL, 12);
 
-    /* download */
-    mkLabel(panel, "DL", 14, 6, fSmall(), SY_MUTED, nullptr);
-    s_dlUnit = nullptr;
-    mkLabel(panel, "B/s", 44, 6, fSmall(), SY_MUTED, &s_dlUnit);
-    mkLabel(panel, "-", 14, 17, fBold18(), SY_TEAL, &s_dlVal);
+    mkLabel(panel, LV_SYMBOL_DOWN, 10, 8, fSymbol(), SY_TEAL, nullptr);
+    mkLabel(panel, "--", 28, 3, fBold18(), SY_TEAL, &s_dlVal);
+    lv_obj_set_width(s_dlVal, 96);
+    mkLabel(panel, "MAX --", 126, 9, fSmall(), SY_MUTED, &s_dlPeak);
+    lv_obj_set_width(s_dlPeak, 124);
+    lv_obj_set_style_text_align(s_dlPeak, LV_TEXT_ALIGN_RIGHT, 0);
 
-    /* upload */
-    mkLabel(panel, "UL", 14, 40, fSmall(), SY_MUTED, nullptr);
-    mkLabel(panel, "B/s", 44, 40, fSmall(), SY_MUTED, &s_ulUnit);
-    mkLabel(panel, "-", 14, 51, fBold18(), SY_AMBER, &s_ulVal);
+    mkLabel(panel, LV_SYMBOL_UP, 10, 34, fSymbol(), SY_AMBER, nullptr);
+    mkLabel(panel, "--", 28, 29, fBold18(), SY_AMBER, &s_ulVal);
+    lv_obj_set_width(s_ulVal, 96);
+    mkLabel(panel, "MAX --", 126, 35, fSmall(), SY_MUTED, &s_ulPeak);
+    lv_obj_set_width(s_ulPeak, 124);
+    lv_obj_set_style_text_align(s_ulPeak, LV_TEXT_ALIGN_RIGHT, 0);
 
-    /* chart */
-    s_chart = lv_chart_create(panel);
-    lv_obj_set_pos(s_chart, 102, 18);
-    lv_obj_set_size(s_chart, 158, 44);
-    lv_obj_clear_flag(s_chart, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(s_chart, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_opa(s_chart, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(s_chart, 0, 0);
-    lv_obj_set_style_pad_all(s_chart, 0, 0);
-    lv_obj_set_style_line_width(s_chart, 2, LV_PART_ITEMS);
-    lv_chart_set_type(s_chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_div_line_count(s_chart, 0, 0);
-    lv_chart_set_point_count(s_chart, SY_CHART_POINTS);
-    lv_chart_set_update_mode(s_chart, LV_CHART_UPDATE_MODE_SHIFT);
-    lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 64);
-    s_serDl = lv_chart_add_series(s_chart, SY_TEAL, LV_CHART_AXIS_PRIMARY_Y);
-    s_serUl = lv_chart_add_series(s_chart, SY_AMBER, LV_CHART_AXIS_PRIMARY_Y);
-
-    mkLabel(panel, "MAX --", 102, 3, fSmall(), SY_MUTED, &s_axisLbl);
-    lv_obj_set_width(s_axisLbl, 158);
-    lv_obj_set_style_text_align(s_axisLbl, LV_TEXT_ALIGN_RIGHT, 0);
-
-    /* connection status */
     s_dot = lv_obj_create(panel);
     lv_obj_set_size(s_dot, 7, 7);
-    lv_obj_set_pos(s_dot, 12, 75);
+    lv_obj_set_pos(s_dot, 10, 64);
     lv_obj_set_style_radius(s_dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(s_dot, SY_MUTED, 0);
     lv_obj_set_style_bg_opa(s_dot, LV_OPA_COVER, 0);
@@ -348,9 +380,8 @@ static void buildHome()
     lv_obj_clear_flag(s_dot, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(s_dot, LV_OBJ_FLAG_SCROLLABLE);
 
-    mkLabel(panel, "INIT", 22, 69, fSmall(), SY_MUTED, &s_netState);
-    lv_obj_set_width(s_netState, 238);
-    lv_obj_set_style_text_align(s_netState, LV_TEXT_ALIGN_LEFT, 0);
+    mkLabel(panel, "INIT", 20, 58, fSmall(), SY_MUTED, &s_netState);
+    lv_obj_set_width(s_netState, 236);
 }
 
 static const char *connText(ConnState c)
@@ -377,96 +408,31 @@ static lv_color_t connColor(ConnState c)
     }
 }
 
-/* Chart scale: values are stored in KB/s, or in half-MB steps once the peak
- * passes 4 MB/s, and the axis caption states which unit is in use. */
-static uint8_t s_chartMB = 0;
-static float   s_chartPeak = 0.0f;
-
-static int niceCeil(int v)
-{
-    static const int steps[] = { 16, 32, 64, 128, 256, 512, 1024, 2048, 4096,
-                                 8192, 12288, 16384, 24576, 32000 };
-    for (size_t i = 0; i < sizeof(steps) / sizeof(steps[0]); i++) {
-        if (v <= steps[i]) return steps[i];
-    }
-    return 32000;
-}
-
-static void chartPush(float downBps, float upBps)
-{
-    if (!s_chart) return;
-
-    float peak = downBps > upBps ? downBps : upBps;
-
-    /* Decay the remembered peak so the scale comes back down slowly. */
-    s_chartPeak = s_chartPeak * 0.985f;
-    if (peak > s_chartPeak) s_chartPeak = peak;
-
-    uint8_t wantMB = (s_chartPeak > 4.0f * 1024.0f * 1024.0f) ? 1 : 0;
-    if (wantMB != s_chartMB) {
-        s_chartMB = wantMB;
-        /* Units changed: old points would be meaningless, start clean. */
-        lv_chart_set_all_value(s_chart, s_serDl, 0);
-        lv_chart_set_all_value(s_chart, s_serUl, 0);
-    }
-
-    /* 1 chart unit = 1 KB/s, or 0.5 MB/s above the switch point. */
-    float div = s_chartMB ? (512.0f * 1024.0f) : 1024.0f;
-    int dv = (int)(downBps / div + 0.5f);
-    int uv = (int)(upBps / div + 0.5f);
-    if (dv < 0) dv = 0;
-    if (uv < 0) uv = 0;
-
-    lv_chart_set_next_value(s_chart, s_serDl, (lv_coord_t)dv);
-    lv_chart_set_next_value(s_chart, s_serUl, (lv_coord_t)uv);
-
-    /* Scale to the visible window. */
-    uint32_t cnt = lv_chart_get_point_count(s_chart);
-    int32_t maxv = 0;
-    for (uint32_t i = 0; i < cnt; i++) {
-        if (s_serDl->y_points[i] > maxv) maxv = s_serDl->y_points[i];
-        if (s_serUl->y_points[i] > maxv) maxv = s_serUl->y_points[i];
-    }
-    int top = niceCeil((int)maxv + (maxv / 10));
-    lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, top);
-
-    char buf[24];
-    if (s_chartMB) snprintf(buf, sizeof(buf), "MAX %.1f MB/s", (float)top * 0.5f);
-    else           snprintf(buf, sizeof(buf), "MAX %d KB/s", top);
-    setTextIfChanged(s_axisLbl, buf);
-}
-
 static void updateNetLabels(const Snapshot &s)
 {
-    char num[16];
-    const char *unit = "B/s";
-    float down = s.netValid ? s.downBps : 0.0f;
-    float up = s.netValid ? s.upBps : 0.0f;
+    char b[32];
+    bool live = s.netValid && !s.netStale;
 
-    if (!s.netValid) {
+    if (!live) {
         setTextIfChanged(s_dlVal, "--");
         setTextIfChanged(s_ulVal, "--");
-        setTextIfChanged(s_dlUnit, "");
-        setTextIfChanged(s_ulUnit, "");
-        lv_obj_set_style_text_color(s_dlVal, SY_MUTED, 0);
-        lv_obj_set_style_text_color(s_ulVal, SY_MUTED, 0);
-        return;
+    } else {
+        fmtSpeed(s.downBps, b, sizeof(b));
+        setTextIfChanged(s_dlVal, b);
+        fmtSpeed(s.upBps, b, sizeof(b));
+        setTextIfChanged(s_ulVal, b);
     }
 
-    fmtRate(down, num, sizeof(num), &unit);
-    setTextIfChanged(s_dlVal, num);
-    setTextIfChanged(s_dlUnit, unit);
+    char d[32], u[32];
+    fmtSpeed(s_peakDown, d, sizeof(d));
+    fmtSpeed(s_peakUp, u, sizeof(u));
+    snprintf(b, sizeof(b), "MAX %s", s_peakDown > 0.5 ? d : "--");
+    setTextIfChanged(s_dlPeak, b);
+    snprintf(b, sizeof(b), "MAX %s", s_peakUp > 0.5 ? u : "--");
+    setTextIfChanged(s_ulPeak, b);
 
-    fmtRate(up, num, sizeof(num), &unit);
-    setTextIfChanged(s_ulVal, num);
-    setTextIfChanged(s_ulUnit, unit);
-
-    /* A stale sample keeps its value but loses its colour, so "58 KB/s" from
-     * two minutes ago cannot be mistaken for live traffic. */
-    lv_color_t dlc = s.netStale ? SY_MUTED : SY_TEAL;
-    lv_color_t ulc = s.netStale ? SY_MUTED : SY_AMBER;
-    lv_obj_set_style_text_color(s_dlVal, dlc, 0);
-    lv_obj_set_style_text_color(s_ulVal, ulc, 0);
+    lv_obj_set_style_text_color(s_dlVal, live ? SY_TEAL : SY_MUTED, 0);
+    lv_obj_set_style_text_color(s_ulVal, live ? SY_AMBER : SY_MUTED, 0);
 }
 
 static void updateStatusLine(const Snapshot &s)
@@ -476,26 +442,18 @@ static void updateStatusLine(const Snapshot &s)
 
     char buf[96];
     if (s.conn == CONN_ONLINE) {
-        uint32_t age = 0;
-        if (s.lastFastMs) age = (millis() - s.lastFastMs) / 1000;
+        uint32_t age = s.lastFastMs ? (millis() - s.lastFastMs) / 1000 : 0;
         if (age > 999) age = 999;
 
-        /* Interface name (or a real link-down flag) plus the age of the
-         * sample, so a frozen number is never mistaken for live traffic. */
-        if (s.linkValid && s.linkName[0] && !s.linkUp)
-            snprintf(buf, sizeof(buf), "ONLINE  %s DOWN  %us", s.linkName, (unsigned)age);
-        else if (s.nic[0])
-            snprintf(buf, sizeof(buf), "ONLINE  %s  %us", s.nic, (unsigned)age);
-        else if (s.model[0])
-            snprintf(buf, sizeof(buf), "ONLINE  %s  %us", s.model, (unsigned)age);
-        else
-            snprintf(buf, sizeof(buf), "ONLINE  %us", (unsigned)age);
+        if (s.netStale)                     snprintf(buf, sizeof(buf), "ONLINE  stale %us", (unsigned)age);
+        else if (s.linkValid && s.linkName[0] && !s.linkUp)
+                                            snprintf(buf, sizeof(buf), "ONLINE  %s DOWN  %us", s.linkName, (unsigned)age);
+        else if (s.nic[0])                  snprintf(buf, sizeof(buf), "ONLINE  %s  %us", s.nic, (unsigned)age);
+        else                                snprintf(buf, sizeof(buf), "ONLINE  %us", (unsigned)age);
     } else {
         const char *base = connText(s.conn);
-        if (s.msg[0])
-            snprintf(buf, sizeof(buf), "%s  %s", base, s.msg);
-        else
-            snprintf(buf, sizeof(buf), "%s", base);
+        if (s.msg[0]) snprintf(buf, sizeof(buf), "%s  %s", base, s.msg);
+        else          snprintf(buf, sizeof(buf), "%s", base);
     }
     setTextIfChanged(s_netState, buf);
     lv_obj_set_style_text_color(s_netState, col, 0);
@@ -503,7 +461,6 @@ static void updateStatusLine(const Snapshot &s)
 
 static void updateHome(const Snapshot &s, bool force)
 {
-    /* clock, once per second */
     static uint32_t lastClock = 0;
     uint32_t now = millis();
     if (s_dev && (force || now - lastClock >= 1000)) {
@@ -517,19 +474,131 @@ static void updateHome(const Snapshot &s, bool force)
         }
     }
 
-    /* meters: only drive the animation when the value actually moved */
-    static int16_t lastCpu = -1, lastRam = -1;
-    if (s.cpuValid && s.cpuUse != lastCpu) {
-        lastCpu = s.cpuUse;
+    if (s.cpuValid && s.cpuUse != s_lastCpu) {
+        s_lastCpu = s.cpuUse;
         Content_Update(&Meter1, s.cpuUse, true);
     }
-    if (s.ramValid && s.ramUse != lastRam) {
-        lastRam = s.ramUse;
+    if (s.ramValid && s.ramUse != s_lastRam) {
+        s_lastRam = s.ramUse;
         Content_Update(&Meter2, s.ramUse, false);
     }
 
     if (force) updateNetLabels(s);
     updateStatusLine(s);
+}
+
+/* ============================================== overview (session) page */
+static lv_obj_t *s_ovUser, *s_ovProto, *s_ovState, *s_ovSince, *s_ovDuration, *s_ovHost;
+
+static void buildOverview()
+{
+    lv_obj_t *scr = newScreen(SY_DARK);
+    s_scr[PAGE_OVERVIEW] = scr;
+    pageHeader(scr, "SESSION");
+
+    lv_obj_t *cap = nullptr;
+    mkLabel(scr, "CURRENT SESSION", SY_PAD, 42, fSmall(), SY_MUTED, &cap);
+    lv_obj_set_width(cap, SY_CONTENT_W);
+    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_ovUser = nullptr;
+    mkLabel(scr, "--", SY_PAD, 56, fHuge(), SY_TEXT, &s_ovUser);
+    lv_obj_set_size(s_ovUser, SY_CONTENT_W, 52);
+    lv_obj_set_style_text_align(s_ovUser, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_ovUser, LV_LABEL_LONG_DOT);
+
+    mkPanel(scr, SY_PAD + 40, 114, SY_CONTENT_W - 80, 1, SY_LINE, 0);
+
+    s_ovProto = nullptr;
+    mkLabel(scr, "HTTP", SY_PAD, 120, fValue(), SY_TEAL, &s_ovProto);
+    lv_obj_set_width(s_ovProto, 130);
+    lv_obj_set_style_text_align(s_ovProto, LV_TEXT_ALIGN_LEFT, 0);
+
+    s_ovState = nullptr;
+    mkLabel(scr, "NOT CONNECTED", SY_PAD + 130, 120, fValue(), SY_MUTED, &s_ovState);
+    lv_obj_set_width(s_ovState, 130);
+    lv_obj_set_style_text_align(s_ovState, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_t *sinceCap = nullptr;
+    mkLabel(scr, "CONNECTED SINCE", SY_PAD, 150, fSmall(), SY_MUTED, &sinceCap);
+    lv_obj_set_width(sinceCap, SY_CONTENT_W);
+    lv_obj_set_style_text_align(sinceCap, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_ovSince = nullptr;
+    mkLabel(scr, "--", SY_PAD, 164, fValue(), SY_TEXT, &s_ovSince);
+    lv_obj_set_width(s_ovSince, SY_CONTENT_W);
+    lv_obj_set_style_text_align(s_ovSince, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_ovDuration = nullptr;
+    mkLabel(scr, "", SY_PAD, 188, fSmall(), SY_MUTED, &s_ovDuration);
+    lv_obj_set_width(s_ovDuration, SY_CONTENT_W);
+    lv_obj_set_style_text_align(s_ovDuration, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_ovHost = nullptr;
+    mkLabel(scr, "", SY_PAD, 214, fSmall(), SY_MUTED, &s_ovHost);
+    lv_obj_set_width(s_ovHost, SY_CONTENT_W);
+    lv_obj_set_style_text_align(s_ovHost, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_ovHost, LV_LABEL_LONG_DOT);
+}
+
+/* The page shows the account this app logs in with (not the NAS-wide session
+ * list: SYNO.Core.CurrentConnection returns every DSM session and does not
+ * mark the requesting one, so it cannot identify us reliably). */
+static void overviewApply(const Snapshot &s)
+{
+    static uint32_t lastCfgMs = 0;
+    static char user[40] = "";
+    static char host[64] = "";
+    static bool https = false;
+
+    uint32_t now = millis();
+    if (lastCfgMs == 0 || now - lastCfgMs > 2000) {
+        lastCfgMs = now;
+        Config c;
+        CfgGet(c);
+        snprintf(user, sizeof(user), "%s", c.user.length() ? c.user.c_str() : "");
+        snprintf(host, sizeof(host), "%s:%u", c.host.c_str(), (unsigned)c.port);
+        https = c.https;
+    }
+
+    setTextIfChanged(s_ovUser, user[0] ? user : "not configured");
+    setTextIfChanged(s_ovProto, https ? "HTTPS" : "HTTP");
+    lv_obj_set_style_text_color(s_ovProto, https ? SY_TEAL : SY_AMBER, 0);
+
+    setTextIfChanged(s_ovState, connText(s.conn));
+    lv_obj_set_style_text_color(s_ovState, connColor(s.conn), 0);
+
+    /* Connected-since is recorded by this app when DSM accepted the login.
+     * It is not a DSM "last login" value and is labelled as such. */
+    char since[24];
+    if (s.conn == CONN_ONLINE && s.sessSince > 1600000000u) {
+        time_t t = (time_t)s.sessSince;
+        struct tm tmv;
+        if (localtime_r(&t, &tmv)) {
+            snprintf(since, sizeof(since), "%04d-%02d-%02d %02d:%02d",
+                     tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                     tmv.tm_hour, tmv.tm_min);
+        } else {
+            snprintf(since, sizeof(since), "--");
+        }
+    } else if (s.conn == CONN_ONLINE && s.sessSinceMs) {
+        snprintf(since, sizeof(since), "clock not set");
+    } else {
+        snprintf(since, sizeof(since), "--");
+    }
+    setTextIfChanged(s_ovSince, since);
+
+    char dur[32];
+    if (s.conn == CONN_ONLINE && s.sessSinceMs) {
+        uint32_t sec = (millis() - s.sessSinceMs) / 1000;
+        if (sec >= 3600) snprintf(dur, sizeof(dur), "APP CONNECTED  %uh %02um", (unsigned)(sec / 3600), (unsigned)((sec / 60) % 60));
+        else             snprintf(dur, sizeof(dur), "APP CONNECTED  %um %02us", (unsigned)(sec / 60), (unsigned)(sec % 60));
+    } else {
+        dur[0] = 0;
+    }
+    setTextIfChanged(s_ovDuration, dur);
+
+    setTextIfChanged(s_ovHost, host[0] && host[0] != ':' ? host : "");
 }
 
 /* ========================================================= storage page */
@@ -580,21 +649,21 @@ static void buildStorage()
     pageHeader(scr, "STORAGE");
 
     for (int i = 0; i < STOR_CARDS; i++) {
-        lv_obj_t *card = mkPanel(scr, 6, 30 + i * 54, 268, 50, SY_PANEL, 8);
+        lv_obj_t *card = mkPanel(scr, SY_PAD, 40 + i * 50, SY_CONTENT_W, 46, SY_PANEL, 8);
 
         s_storName[i] = nullptr;
-        mkLabel(card, "-", 8, 3, fValue(), SY_TEXT, &s_storName[i]);
-        lv_obj_set_width(s_storName[i], 190);
+        mkLabel(card, "-", 10, 2, fValue(), SY_TEXT, &s_storName[i]);
+        lv_obj_set_width(s_storName[i], 180);
         lv_label_set_long_mode(s_storName[i], LV_LABEL_LONG_DOT);
 
         s_storPct[i] = nullptr;
-        mkLabel(card, "-", 200, 3, fValue(), SY_TEAL, &s_storPct[i]);
+        mkLabel(card, "-", 190, 2, fValue(), SY_TEAL, &s_storPct[i]);
         lv_obj_set_width(s_storPct[i], 60);
         lv_obj_set_style_text_align(s_storPct[i], LV_TEXT_ALIGN_RIGHT, 0);
 
         lv_obj_t *bar = lv_bar_create(card);
-        lv_obj_set_pos(bar, 8, 24);
-        lv_obj_set_size(bar, 252, 6);
+        lv_obj_set_pos(bar, 10, 22);
+        lv_obj_set_size(bar, 240, 6);
         lv_obj_set_style_bg_color(bar, SY_LINE, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(bar, SY_TEAL, LV_PART_INDICATOR);
@@ -605,8 +674,8 @@ static void buildStorage()
         s_storBar[i] = bar;
 
         s_storSize[i] = nullptr;
-        mkLabel(card, "-", 8, 33, fSmall(), SY_MUTED, &s_storSize[i]);
-        lv_obj_set_width(s_storSize[i], 250);
+        mkLabel(card, "-", 10, 30, fSmall(), SY_MUTED, &s_storSize[i]);
+        lv_obj_set_width(s_storSize[i], 240);
         lv_label_set_long_mode(s_storSize[i], LV_LABEL_LONG_DOT);
 
         lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
@@ -614,26 +683,27 @@ static void buildStorage()
     }
 
     s_storMsg = nullptr;
-    mkLabel(scr, "Waiting for data...", 8, 100, fText(), SY_MUTED, &s_storMsg);
-    lv_obj_set_width(s_storMsg, 264);
+    mkLabel(scr, "Waiting for data...", SY_PAD, 100, fText(), SY_MUTED, &s_storMsg);
+    lv_obj_set_width(s_storMsg, SY_CONTENT_W);
     lv_obj_set_style_text_align(s_storMsg, LV_TEXT_ALIGN_CENTER, 0);
 
-    s_storPrev = mkButton(scr, "<", 236, 194, 18, 18, SY_PANEL_HI, SY_MUTED,
-                          storArrow_cb, (void *)(intptr_t)-1);
-    s_storNext = mkButton(scr, ">", 256, 194, 18, 18, SY_PANEL_HI, SY_MUTED,
-                          storArrow_cb, (void *)(intptr_t)1);
-
     s_storDisk = nullptr;
-    mkLabel(scr, "", 8, 196, fSmall(), SY_MUTED, &s_storDisk);
-    lv_obj_set_width(s_storDisk, 182);
+    mkLabel(scr, "", SY_PAD, 192, fSmall(), SY_MUTED, &s_storDisk);
+    lv_obj_set_width(s_storDisk, 176);
     lv_label_set_long_mode(s_storDisk, LV_LABEL_LONG_DOT);
 
     s_storPageLbl = nullptr;
-    mkLabel(scr, "1/1", 200, 196, fSmall(), SY_MUTED, &s_storPageLbl);
-    lv_obj_set_width(s_storPageLbl, 32);
+    mkLabel(scr, "1/1", 190, 192, fSmall(), SY_MUTED, &s_storPageLbl);
+    lv_obj_set_width(s_storPageLbl, 40);
     lv_obj_set_style_text_align(s_storPageLbl, LV_TEXT_ALIGN_RIGHT, 0);
 
-    mkButton(scr, "UPS STATUS   >", 6, 214, 268, 24, SY_PANEL, SY_TEXT, upsEntry_cb, nullptr);
+    s_storPrev = mkButton(scr, "<", 234, 190, 16, 16, SY_PANEL_HI, SY_MUTED,
+                          storArrow_cb, (void *)(intptr_t)-1);
+    s_storNext = mkButton(scr, ">", 254, 190, 16, 16, SY_PANEL_HI, SY_MUTED,
+                          storArrow_cb, (void *)(intptr_t)1);
+
+    mkButton(scr, "UPS STATUS   >", SY_PAD, 208, SY_CONTENT_W, 22, SY_PANEL, SY_TEXT,
+             upsEntry_cb, nullptr);
 }
 
 static void storApply(const Snapshot &s)
@@ -642,21 +712,12 @@ static void storApply(const Snapshot &s)
     if (pages < 1) pages = 1;
     if (s_storPage >= pages) s_storPage = (uint8_t)(pages - 1);
 
-    if (!s.storageValid) {
+    if (!s.storageValid || s.volCount == 0) {
         for (int i = 0; i < STOR_CARDS; i++) lv_obj_add_flag(s_storCard[i], LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_storMsg, LV_OBJ_FLAG_HIDDEN);
-        setTextIfChanged(s_storMsg, s.conn == CONN_ONLINE ? "Reading volumes..." : "No data");
-        setTextIfChanged(s_storPageLbl, "");
-        setTextIfChanged(s_storDisk, "");
-        lv_obj_add_flag(s_storPrev, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_storNext, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-
-    if (s.volCount == 0) {
-        for (int i = 0; i < STOR_CARDS; i++) lv_obj_add_flag(s_storCard[i], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(s_storMsg, LV_OBJ_FLAG_HIDDEN);
-        setTextIfChanged(s_storMsg, "No volume reported by the storage API");
+        setTextIfChanged(s_storMsg, !s.storageValid
+                         ? (s.conn == CONN_ONLINE ? "Reading volumes..." : "No data")
+                         : "No volume reported by the storage API");
         setTextIfChanged(s_storPageLbl, "");
         setTextIfChanged(s_storDisk, "");
         lv_obj_add_flag(s_storPrev, LV_OBJ_FLAG_HIDDEN);
@@ -676,17 +737,14 @@ static void storApply(const Snapshot &s)
         lv_obj_clear_flag(s_storCard[i], LV_OBJ_FLAG_HIDDEN);
 
         const VolumeInfo &v = s.vols[idx];
-        const char *name = v.name[0] ? v.name : "volume";
-
         int pct = 0;
         if (v.total > 0) {
             uint64_t used = v.used > v.total ? v.total : v.used;
             pct = (int)((used * 100ULL) / v.total);
-            if (pct < 0) pct = 0;
             if (pct > 100) pct = 100;
         }
 
-        setTextIfChanged(s_storName[i], name);
+        setTextIfChanged(s_storName[i], v.name[0] ? v.name : "volume");
 
         char pb[8];
         snprintf(pb, sizeof(pb), "%d%%", pct);
@@ -701,15 +759,11 @@ static void storApply(const Snapshot &s)
         fmtBytes(v.total > v.used ? v.total - v.used : 0, freeb, sizeof(freeb));
 
         char line[72];
-        if (v.status[0] && strcmp(v.status, "normal") != 0)
-            snprintf(line, sizeof(line), "%s / %s  |  %s", used, total, v.status);
-        else
-            snprintf(line, sizeof(line), "%s / %s  |  %s free", used, total, freeb);
+        bool warn = v.status[0] && strcmp(v.status, "normal") != 0;
+        if (warn) snprintf(line, sizeof(line), "%s / %s  |  %s", used, total, v.status);
+        else      snprintf(line, sizeof(line), "%s / %s  |  %s free", used, total, freeb);
         setTextIfChanged(s_storSize[i], line);
-
-        lv_obj_set_style_text_color(s_storSize[i],
-                                    (v.status[0] && strcmp(v.status, "normal") != 0) ? SY_AMBER : SY_MUTED,
-                                    0);
+        lv_obj_set_style_text_color(s_storSize[i], warn ? SY_AMBER : SY_MUTED, 0);
     }
 
     char pl[16];
@@ -724,20 +778,13 @@ static void storApply(const Snapshot &s)
         lv_obj_add_flag(s_storNext, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* Disk detail is only shown when the storage response really carried it;
-     * DSM 7 does not always include disk_info, so say so instead of guessing. */
     char dl[48];
-    if (!s.diskApiValid) {
-        snprintf(dl, sizeof(dl), "Disk detail: not in API");
-    } else if (s.diskWarn > 0) {
-        snprintf(dl, sizeof(dl), "%u disks, %u warning", (unsigned)s.diskCount,
-                 (unsigned)s.diskWarn);
-    } else if (s.diskTempMax >= 0) {
-        snprintf(dl, sizeof(dl), "%u disks OK | %d C", (unsigned)s.diskCount,
-                 (int)s.diskTempMax);
-    } else {
-        snprintf(dl, sizeof(dl), "%u disks OK", (unsigned)s.diskCount);
-    }
+    if (!s.diskApiValid)            snprintf(dl, sizeof(dl), "Disk detail: not in API");
+    else if (s.diskWarn > 0)        snprintf(dl, sizeof(dl), "%u disks, %u warning",
+                                             (unsigned)s.diskCount, (unsigned)s.diskWarn);
+    else if (s.diskTempMax >= 0)    snprintf(dl, sizeof(dl), "%u disks OK | %d C",
+                                             (unsigned)s.diskCount, (int)s.diskTempMax);
+    else                            snprintf(dl, sizeof(dl), "%u disks OK", (unsigned)s.diskCount);
     setTextIfChanged(s_storDisk, dl);
     lv_obj_set_style_text_color(s_storDisk, s.diskWarn > 0 ? SY_AMBER : SY_MUTED, 0);
 }
@@ -757,18 +804,18 @@ static void buildSystem()
                                             "MEMORY", "TEMP", "UPTIME", "NETWORK" };
 
     for (int i = 0; i < SYS_ROWS; i++) {
-        lv_obj_t *row = mkPanel(scr, 6, 30 + i * 24, 268, 22, SY_PANEL, 6);
+        lv_obj_t *row = mkPanel(scr, SY_PAD, 40 + i * 21, SY_CONTENT_W, 20, SY_PANEL, 6);
         mkLabel(row, labels[i], 8, 3, fSmall(), SY_MUTED, nullptr);
         s_sysVal[i] = nullptr;
-        mkLabel(row, "--", 82, 2, fValue(), SY_TEXT, &s_sysVal[i]);
+        mkLabel(row, "--", 76, 1, fValue(), SY_TEXT, &s_sysVal[i]);
         lv_obj_set_width(s_sysVal[i], 176);
         lv_obj_set_style_text_align(s_sysVal[i], LV_TEXT_ALIGN_RIGHT, 0);
         lv_label_set_long_mode(s_sysVal[i], LV_LABEL_LONG_DOT);
     }
 
     s_sysNote = nullptr;
-    mkLabel(scr, "", 8, 224, fSmall(), SY_MUTED, &s_sysNote);
-    lv_obj_set_width(s_sysNote, 264);
+    mkLabel(scr, "", SY_PAD, 214, fSmall(), SY_MUTED, &s_sysNote);
+    lv_obj_set_width(s_sysNote, SY_CONTENT_W);
     lv_label_set_long_mode(s_sysNote, LV_LABEL_LONG_DOT);
 }
 
@@ -782,6 +829,8 @@ static void sysApply(const Snapshot &s)
 
     char b[48];
     setTextIfChanged(s_sysVal[0], s.model[0] ? s.model : "n/a");
+
+    /* firmware_ver is the DSM release string, e.g. "DSM 7.3-81180". */
     setTextIfChanged(s_sysVal[1], s.dsm[0] ? s.dsm : "n/a");
     setTextIfChanged(s_sysVal[2], s.cpuSeries[0] ? s.cpuSeries : "n/a");
 
@@ -803,7 +852,6 @@ static void sysApply(const Snapshot &s)
     setTextIfChanged(s_sysVal[6], up[0] ? up : "n/a");
 
     if (s.linkValid) {
-        /* "ovs_eth0 UP 1000M" - name, link state and negotiated speed. */
         if (s.linkSpeed > 0)
             snprintf(b, sizeof(b), "%s %s %dM", s.linkName[0] ? s.linkName : "nic",
                      s.linkUp ? "UP" : "DOWN", (int)s.linkSpeed);
@@ -821,31 +869,59 @@ static void sysApply(const Snapshot &s)
 }
 
 /* ============================================================== UPS page */
-static lv_obj_t *s_upsBig, *s_upsVal[4], *s_upsNote;
+static lv_obj_t *s_upsBig, *s_upsSub, *s_upsPct, *s_upsBar;
+static lv_obj_t *s_upsRuntime, *s_upsModel, *s_upsNote;
 
 static void buildUps()
 {
     lv_obj_t *scr = newScreen(SY_DARK);
     s_scr[PAGE_UPS] = scr;
-    pageHeader(scr, "UPS");
+    pageHeader(scr, "UPS STATUS");
 
+    lv_obj_t *state = mkPanel(scr, SY_PAD, 40, SY_CONTENT_W, 58, SY_PANEL, 10);
     s_upsBig = nullptr;
-    mkLabel(scr, "WAITING", 8, 36, fBold18(), SY_MUTED, &s_upsBig);
+    mkLabel(state, "WAITING", 12, 9, fBold18(), SY_MUTED, &s_upsBig);
+    s_upsSub = nullptr;
+    mkLabel(state, "reading UPS...", 12, 34, fSmall(), SY_MUTED, &s_upsSub);
+    lv_obj_set_width(s_upsSub, 236);
+    lv_label_set_long_mode(s_upsSub, LV_LABEL_LONG_DOT);
 
-    static const char *labels[4] = { "MODEL", "CHARGE", "RUNTIME", "REPORTED" };
-    for (int i = 0; i < 4; i++) {
-        lv_obj_t *row = mkPanel(scr, 6, 66 + i * 28, 268, 24, SY_PANEL, 6);
-        mkLabel(row, labels[i], 8, 4, fSmall(), SY_MUTED, nullptr);
-        s_upsVal[i] = nullptr;
-        mkLabel(row, "--", 82, 3, fValue(), SY_TEXT, &s_upsVal[i]);
-        lv_obj_set_width(s_upsVal[i], 176);
-        lv_obj_set_style_text_align(s_upsVal[i], LV_TEXT_ALIGN_RIGHT, 0);
-        lv_label_set_long_mode(s_upsVal[i], LV_LABEL_LONG_DOT);
-    }
+    lv_obj_t *bat = mkPanel(scr, SY_PAD, 102, SY_CONTENT_W, 48, SY_PANEL, 10);
+    mkLabel(bat, "BATTERY", 12, 6, fSmall(), SY_MUTED, nullptr);
+    s_upsPct = nullptr;
+    mkLabel(bat, "--", 180, 4, fValue(), SY_TEXT, &s_upsPct);
+    lv_obj_set_width(s_upsPct, 66);
+    lv_obj_set_style_text_align(s_upsPct, LV_TEXT_ALIGN_RIGHT, 0);
+
+    s_upsBar = lv_bar_create(bat);
+    lv_obj_set_pos(s_upsBar, 12, 28);
+    lv_obj_set_size(s_upsBar, 236, 8);
+    lv_obj_set_style_bg_color(s_upsBar, SY_LINE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_upsBar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_upsBar, SY_TEAL, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_upsBar, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_upsBar, 4, LV_PART_INDICATOR);
+    lv_bar_set_range(s_upsBar, 0, 100);
+    lv_bar_set_value(s_upsBar, 0, LV_ANIM_OFF);
+
+    lv_obj_t *rt = mkPanel(scr, SY_PAD, 154, SY_CONTENT_W, 24, SY_PANEL, 6);
+    mkLabel(rt, "RUNTIME", 10, 4, fSmall(), SY_MUTED, nullptr);
+    s_upsRuntime = nullptr;
+    mkLabel(rt, "--:--", 118, 3, fValue(), SY_TEXT, &s_upsRuntime);
+    lv_obj_set_width(s_upsRuntime, 132);
+    lv_obj_set_style_text_align(s_upsRuntime, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_t *md = mkPanel(scr, SY_PAD, 182, SY_CONTENT_W, 24, SY_PANEL, 6);
+    mkLabel(md, "MODEL", 10, 4, fSmall(), SY_MUTED, nullptr);
+    s_upsModel = nullptr;
+    mkLabel(md, "--", 118, 3, fValue(), SY_TEXT, &s_upsModel);
+    lv_obj_set_width(s_upsModel, 132);
+    lv_obj_set_style_text_align(s_upsModel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(s_upsModel, LV_LABEL_LONG_DOT);
 
     s_upsNote = nullptr;
-    mkLabel(scr, "Reading UPS...", 8, 184, fSmall(), SY_MUTED, &s_upsNote);
-    lv_obj_set_size(s_upsNote, 264, 44);
+    mkLabel(scr, "", SY_PAD, 212, fSmall(), SY_MUTED, &s_upsNote);
+    lv_obj_set_size(s_upsNote, SY_CONTENT_W, 18);
     lv_label_set_long_mode(s_upsNote, LV_LABEL_LONG_DOT);
 }
 
@@ -853,115 +929,158 @@ static void upsApply(const Snapshot &s)
 {
     const char *big = "UNKNOWN";
     lv_color_t col = SY_MUTED;
+    const char *sub = "";
     const char *note = "";
+    bool known = true;
 
     switch (s.upsState) {
     case UPS_NONE:
-        big = "NOT DETECTED";
-        col = SY_MUTED;
-        note = "DSM reports no UPS on this NAS.";
+        big = "NOT DETECTED"; col = SY_MUTED;
+        sub = "DSM reports no UPS on this NAS";
         break;
     case UPS_LINE:
-        big = "ON LINE POWER";
-        col = SY_TEAL;
+        big = "ON LINE POWER"; col = SY_TEAL;
+        sub = "Running from mains, battery charging";
         break;
     case UPS_BATTERY:
-        big = "ON BATTERY";
-        col = SY_AMBER;
+        big = "ON BATTERY"; col = SY_AMBER;
+        sub = "Mains lost - running on battery";
         break;
     case UPS_LOW_BATTERY:
-        big = "LOW BATTERY";
-        col = SY_RED;
+        big = "LOW BATTERY"; col = SY_RED;
+        sub = "Battery nearly empty";
         break;
     case UPS_UNSUPPORTED:
-        big = "NOT SUPPORTED";
-        col = SY_MUTED;
-        note = "This DSM does not expose SYNO.Core.ExternalDevice.UPS.";
+        big = "NOT SUPPORTED"; col = SY_MUTED;
+        sub = "SYNO.Core.ExternalDevice.UPS is not available";
+        note = "This DSM does not expose the UPS API.";
         break;
     case UPS_NO_PERMISSION:
-        big = "NO PERMISSION";
-        col = SY_RED;
-        note = "The account may read system data but not the UPS API "
-               "(error 105). An account with the UPS/system privilege is needed.";
+        big = "NO PERMISSION"; col = SY_RED;
+        sub = "Account lacks the UPS privilege (error 105)";
+        note = "A user with the UPS/system privilege is required.";
         break;
     case UPS_ERROR:
-        big = "READ ERROR";
-        col = SY_RED;
-        note = "The UPS API failed; the last values are kept below.";
+        big = "READ ERROR"; col = SY_RED;
+        sub = "The UPS API failed; values below may be old";
+        known = false;
         break;
-    case UPS_UNKNOWN:
     default:
-        big = "STATUS UNKNOWN";
-        col = SY_AMBER;
-        note = s.upsRaw[0] ? "Raw status reported by DSM is shown below." : "Waiting for UPS data...";
+        big = "STATUS UNKNOWN"; col = SY_AMBER;
+        sub = s.upsRaw[0] ? "DSM reported an unrecognised state" : "Waiting for UPS data...";
+        known = false;
         break;
     }
 
     setTextIfChanged(s_upsBig, big);
     lv_obj_set_style_text_color(s_upsBig, col, 0);
-
-    if (s.upsModel[0]) setTextIfChanged(s_upsVal[0], s.upsModel);
-    else setTextIfChanged(s_upsVal[0], "n/a");
+    setTextIfChanged(s_upsSub, sub);
 
     if (s.upsChargeValid) {
         char b[12];
         snprintf(b, sizeof(b), "%d%%", (int)s.upsCharge);
-        setTextIfChanged(s_upsVal[1], b);
-        lv_obj_set_style_text_color(s_upsVal[1], s.upsCharge <= 20 ? SY_RED : SY_TEXT, 0);
+        setTextIfChanged(s_upsPct, b);
+        lv_obj_set_style_text_color(s_upsPct, s.upsCharge <= 20 ? SY_RED : SY_TEXT, 0);
+        lv_bar_set_value(s_upsBar, s.upsCharge, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(s_upsBar,
+            s.upsCharge <= 20 ? SY_RED : (s.upsCharge <= 50 ? SY_AMBER : SY_TEAL),
+            LV_PART_INDICATOR);
     } else {
-        setTextIfChanged(s_upsVal[1], "n/a");
-        lv_obj_set_style_text_color(s_upsVal[1], SY_MUTED, 0);
+        setTextIfChanged(s_upsPct, "n/a");
+        lv_obj_set_style_text_color(s_upsPct, SY_MUTED, 0);
+        lv_bar_set_value(s_upsBar, 0, LV_ANIM_OFF);
     }
 
-    if (s.upsRuntimeValid) {
-        char b[24];
-        int32_t m = s.upsRuntime / 60;
-        if (s.upsRuntime >= 3600)
-            snprintf(b, sizeof(b), "%dh %02dm", (int)(s.upsRuntime / 3600), (int)(m % 60));
-        else
-            snprintf(b, sizeof(b), "%dm", (int)m);
-        setTextIfChanged(s_upsVal[2], b);
+    /* data.runtime is the estimated remaining runtime in seconds on this DSM;
+     * shown as MM:SS (or H:MM:SS past one hour), never rounded to minutes. */
+    if (s.upsRuntimeValid && s.upsRuntime >= 0) {
+        char b[16];
+        fmtRuntime(s.upsRuntime, b, sizeof(b));
+        setTextIfChanged(s_upsRuntime, b);
+        lv_obj_set_style_text_color(s_upsRuntime, s.upsRuntime <= 300 ? SY_RED : SY_TEXT, 0);
     } else {
-        setTextIfChanged(s_upsVal[2], "n/a");
+        setTextIfChanged(s_upsRuntime, "--:--");
+        lv_obj_set_style_text_color(s_upsRuntime, SY_MUTED, 0);
     }
 
-    setTextIfChanged(s_upsVal[3], s.upsRaw[0] ? s.upsRaw : "n/a");
-    setTextIfChanged(s_upsNote, note);
+    setTextIfChanged(s_upsModel, s.upsModel[0] ? s.upsModel : "n/a");
+
+    if (!known && s.upsRaw[0]) {
+        char b[48];
+        snprintf(b, sizeof(b), "reported: %s", s.upsRaw);
+        setTextIfChanged(s_upsNote, b);
+        lv_obj_set_style_text_color(s_upsNote, SY_AMBER, 0);
+    } else {
+        setTextIfChanged(s_upsNote, note);
+        lv_obj_set_style_text_color(s_upsNote, SY_MUTED, 0);
+    }
 }
 
-/* ========================================================= settings page */
-static lv_obj_t *s_setVal[4];      /* host, account, password, proto */
+/* ================================================= settings + keyboard */
+static lv_obj_t *s_setVal[4];
 static lv_obj_t *s_setPort;
 static lv_obj_t *s_setStatus;
 static Config    s_draft;
 
 static lv_obj_t *s_modal = nullptr;
-static lv_obj_t *s_editTa = nullptr;
-static lv_obj_t *s_editErr = nullptr;
+static lv_obj_t *s_kbCanvas = nullptr;
+static lv_obj_t *s_kbTa = nullptr;
+static lv_obj_t *s_kbErr = nullptr;
+static uint8_t   s_kbMode = 0;      /* 0 abc, 1 numbers, 2 symbols */
+static bool      s_kbShift = false;
 static int       s_editField = -1;
-static bool      s_editVisible = false;
+static int       s_kbPressed = 0;
+
+#define KB_DEL       1
+#define KB_CLEAR     2
+#define KB_SPACE     3
+#define KB_OK        4
+#define KB_CLOSE     5
+#define KB_MODE_ABC  6
+#define KB_MODE_NUM  7
+#define KB_MODE_SYM  8
+#define KB_SHIFT     9
+
+/* canvas geometry (object-local) */
+#define KB_CW 260
+#define KB_CH 144
+#define KB_MODES_H 22
+#define KB_KEY_Y0 26
+#define KB_KEY_H 26
+#define KB_KEY_STEP 30
+#define KB_ACT_Y 118
+#define KB_ACT_H 26
+#define KB_COL_STEP 29
+#define KB_KEY_W 27
+
+static const char *KB_LAY_LOWER[3] = { "abcdefghi", "jklmnopqr", "stuvwxyz" };
+static const char *KB_LAY_UPPER[3] = { "ABCDEFGHI", "JKLMNOPQR", "STUVWXYZ" };
+static const char *KB_LAY_NUM[3]   = { "123456789", "0-_.:/@&", "()[]{}<>" };
+static const char *KB_LAY_SYM[3]   = { "\"'`~^|\\/", "%*+=_-#$", "!:;,.?@" };
+
+static const char *KB_MODES[4] = { "ABC", "123", "SYM", "Aa" };
 
 static void settingsApplyDraft();
+static void kbFill();
+static void kbExec(int code);
 
-static void editorClose()
+static void kbClose()
 {
     if (s_modal) {
         lv_obj_del(s_modal);
         s_modal = nullptr;
     }
-    s_editTa = nullptr;
-    s_editErr = nullptr;
+    s_kbCanvas = nullptr;
+    s_kbTa = nullptr;
+    s_kbErr = nullptr;
     s_editField = -1;
-    s_editVisible = false;
+    s_kbPressed = 0;
 }
 
-static void editorOk()
+static void kbApply()
 {
-    if (!s_editTa || s_editField < 0) {
-        editorClose();
-        return;
-    }
-    const char *txt = lv_textarea_get_text(s_editTa);
+    if (!s_kbTa || s_editField < 0) { kbClose(); return; }
+    const char *txt = lv_textarea_get_text(s_kbTa);
 
     switch (s_editField) {
     case 0: s_draft.host = txt ? txt : ""; break;
@@ -970,7 +1089,7 @@ static void editorOk()
     case 3: {
         long p = String(txt ? txt : "").toInt();
         if (p <= 0 || p > 65535) {
-            if (s_editErr) lv_label_set_text(s_editErr, "Port must be 1-65535");
+            if (s_kbErr) lv_label_set_text(s_kbErr, "Port must be 1-65535");
             return;
         }
         s_draft.port = (uint16_t)p;
@@ -978,108 +1097,284 @@ static void editorOk()
     }
     default: break;
     }
-    editorClose();
+    kbClose();
     settingsApplyDraft();
 }
 
-static void editorOk_cb(lv_event_t *e) { (void)e; editorOk(); }
-static void editorCancel_cb(lv_event_t *e) { (void)e; editorClose(); }
-
-static void editorShow_cb(lv_event_t *e)
+/* ---- cell hit test ---- */
+static int kbCellAt(lv_coord_t x, lv_coord_t y)
 {
-    (void)e;
-    if (!s_editTa) return;
-    s_editVisible = !s_editVisible;
-    lv_textarea_set_password_mode(s_editTa, !s_editVisible);
+    if (y >= 0 && y < KB_MODES_H && x >= 0 && x < KB_CW) {
+        int i = x / 66;
+        if (i > 3) i = 3;
+        return 100 + i;
+    }
+    if (y >= KB_KEY_Y0 && y < KB_KEY_Y0 + 3 * KB_KEY_STEP) {
+        int r = (y - KB_KEY_Y0) / KB_KEY_STEP;
+        int c = x / KB_COL_STEP;
+        if (c > 8) c = 8;
+        if (c < 0) return 0;
+        return 200 + r * 9 + c;
+    }
+    if (y >= KB_ACT_Y && y < KB_ACT_Y + KB_ACT_H) {
+        if (x < 62)  return 300;
+        if (x < 170) return 301;
+        if (x < 216) return 302;
+        return 303;
+    }
+    return 0;
 }
 
-static void editorKb_cb(lv_event_t *e)
+static char kbCharAt(int row, int col)
+{
+    const char **lay = (s_kbMode == 1) ? KB_LAY_NUM
+                     : (s_kbMode == 2) ? KB_LAY_SYM
+                     : (s_kbShift ? KB_LAY_UPPER : KB_LAY_LOWER);
+    if (row < 0 || row > 2 || col < 0 || col > 8) return 0;
+    return lay[row][col];
+}
+
+static void kbExec(int code)
+{
+    if (!s_kbTa) return;
+
+    if (code >= 100 && code <= 103) {
+        if (code == 100) s_kbMode = 0;
+        else if (code == 101) s_kbMode = 1;
+        else if (code == 102) s_kbMode = 2;
+        else s_kbShift = !s_kbShift;
+        if (s_kbCanvas) lv_obj_invalidate(s_kbCanvas);
+        return;
+    }
+    if (code >= 200 && code <= 226) {
+        int idx = code - 200;
+        char c = kbCharAt(idx / 9, idx % 9);
+        if (!c) return;
+        if (s_kbMode == 0 && s_kbShift) {
+            c = (char)toupper((unsigned char)c);
+            s_kbShift = false;
+            if (s_kbCanvas) lv_obj_invalidate(s_kbCanvas);
+        }
+        lv_textarea_add_char(s_kbTa, c);
+        return;
+    }
+    switch (code) {
+    case 300: lv_textarea_set_text(s_kbTa, ""); break;
+    case 301: lv_textarea_add_char(s_kbTa, ' '); break;
+    case 302: lv_textarea_del_char(s_kbTa); break;
+    case 303: kbApply(); break;
+    default: break;
+    }
+}
+
+/* ---- drawing ---- */
+static void kbDrawCell(lv_draw_ctx_t *ctx, lv_coord_t x, lv_coord_t y,
+                       lv_coord_t w, lv_coord_t h, const char *txt,
+                       bool pressed, bool selected, bool primary)
+{
+    lv_draw_rect_dsc_t rd;
+    lv_draw_rect_dsc_init(&rd);
+    rd.radius = 6;
+    rd.bg_opa = LV_OPA_COVER;
+
+    lv_color_t fg = SY_TEXT;
+    if (primary) {
+        rd.bg_color = SY_TEAL;
+        fg = SY_DARK;
+    } else if (pressed) {
+        rd.bg_color = SY_PANEL_HI;
+        fg = SY_TEAL;
+    } else if (selected) {
+        rd.bg_color = SY_PANEL_HI;
+        fg = SY_TEAL;
+    } else {
+        rd.bg_color = SY_PANEL;
+    }
+
+    lv_area_t a;
+    a.x1 = x; a.y1 = y; a.x2 = x + w - 1; a.y2 = y + h - 1;
+    lv_draw_rect(ctx, &rd, &a);
+
+    lv_draw_label_dsc_t ld;
+    lv_draw_label_dsc_init(&ld);
+    ld.font = fText();
+    ld.color = fg;
+    ld.align = LV_TEXT_ALIGN_CENTER;
+
+    lv_coord_t lh = lv_font_get_line_height(fText());
+    lv_area_t ta;
+    ta.x1 = x; ta.y1 = y + (h - lh) / 2; ta.x2 = x + w - 1; ta.y2 = y + h - 1;
+    lv_draw_label(ctx, &ld, &ta, txt, NULL);
+}
+
+static void kbDraw_cb(lv_event_t *e)
+{
+    lv_draw_ctx_t *ctx = lv_event_get_draw_ctx(e);
+    if (!ctx) return;
+
+    lv_obj_t *obj = lv_event_get_target(e);
+    lv_area_t base;
+    lv_obj_get_coords(obj, &base);
+    lv_coord_t ox = base.x1, oy = base.y1;
+
+    /* mode row */
+    for (int i = 0; i < 4; i++) {
+        bool sel = (i < 3) ? (s_kbMode == i) : s_kbShift;
+        kbDrawCell(ctx, ox + i * 66, oy, 62, KB_MODES_H, KB_MODES[i],
+                   s_kbPressed == 100 + i, sel, false);
+    }
+
+    /* letter / digit / symbol keys */
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 9; c++) {
+            char ch = kbCharAt(r, c);
+            if (!ch) continue;
+            char txt[2] = { ch, 0 };
+            int code = 200 + r * 9 + c;
+            kbDrawCell(ctx, ox + c * KB_COL_STEP, oy + KB_KEY_Y0 + r * KB_KEY_STEP,
+                       KB_KEY_W, KB_KEY_H, txt, s_kbPressed == code, false, false);
+        }
+    }
+
+    /* actions */
+    static const char *lbl[4] = { "CLR", "SPACE", "DEL", "OK" };
+    static const lv_coord_t ax[4] = { 0, 66, 174, 220 };
+    static const lv_coord_t aw[4] = { 62, 104, 42, 40 };
+    for (int i = 0; i < 4; i++) {
+        int code = 300 + i;
+        kbDrawCell(ctx, ox + ax[i], oy + KB_ACT_Y, aw[i], KB_ACT_H, lbl[i],
+                   s_kbPressed == code, false, i == 3);
+    }
+}
+
+static void kbTouch_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_READY) editorOk();
-    else if (code == LV_EVENT_CANCEL) editorClose();
+    lv_obj_t *obj = lv_event_get_target(e);
+
+    if (code == LV_EVENT_PRESSED) {
+        lv_indev_t *indev = lv_indev_get_act();
+        if (!indev) return;
+        lv_point_t p;
+        lv_indev_get_point(indev, &p);
+        lv_area_t a;
+        lv_obj_get_coords(obj, &a);
+        int c = kbCellAt(p.x - a.x1, p.y - a.y1);
+        if (c != s_kbPressed) {
+            s_kbPressed = c;
+            lv_obj_invalidate(obj);
+        }
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        int c = s_kbPressed;
+        s_kbPressed = 0;
+        lv_obj_invalidate(obj);
+        if (code == LV_EVENT_RELEASED && c) kbExec(c);
+    }
 }
 
-static void fieldClick_cb(lv_event_t *e)
+static void kbClose_cb(lv_event_t *e)
 {
-    int field = (int)(intptr_t)lv_event_get_user_data(e);
+    (void)e;
+    kbClose();
+}
+
+static void kbOpen(int field)
+{
     if (s_modal) return;
 
     s_editField = field;
-    s_editVisible = false;
+    s_kbShift = false;
+    s_kbMode = (field == 3) ? 1 : 0;
+    s_kbPressed = 0;
 
+    /* One panel, one textarea, one canvas: the whole keyboard is drawn by the
+     * canvas, so a tap on a field costs ~8 objects instead of ~70. */
     lv_obj_t *panel = mkPanel(s_scr[PAGE_SETTINGS], 0, 0, SY_W, SY_H, SY_DARK, 0);
     s_modal = panel;
 
     static const char *titles[4] = { "Server address", "Account", "Password", "Port" };
-    mkLabel(panel, titles[field], 10, 8, fValue(), SY_TEXT, nullptr);
+    mkLabel(panel, titles[field], SY_PAD, 10, fValue(), SY_TEXT, nullptr);
+    mkButton(panel, "X", 240, 10, 30, 20, SY_PANEL, SY_MUTED, kbClose_cb, nullptr);
 
-    s_editTa = lv_textarea_create(panel);
-    lv_obj_set_pos(s_editTa, 8, 34);
-    lv_obj_set_size(s_editTa, 264, 34);
-    lv_textarea_set_one_line(s_editTa, true);
-    lv_obj_set_style_bg_color(s_editTa, SY_PANEL, 0);
-    lv_obj_set_style_border_color(s_editTa, SY_LINE, 0);
-    lv_obj_set_style_border_width(s_editTa, 1, 0);
-    lv_obj_set_style_radius(s_editTa, 8, 0);
-    lv_obj_set_style_text_color(s_editTa, SY_TEXT, 0);
-    lv_obj_set_style_text_font(s_editTa, fValue(), 0);
-    lv_obj_set_style_pad_all(s_editTa, 6, 0);
+    s_kbTa = lv_textarea_create(panel);
+    lv_obj_set_pos(s_kbTa, SY_PAD, 34);
+    lv_obj_set_size(s_kbTa, SY_CONTENT_W, 30);
+    lv_textarea_set_one_line(s_kbTa, true);
+    lv_obj_set_style_bg_color(s_kbTa, SY_PANEL, 0);
+    lv_obj_set_style_border_color(s_kbTa, SY_LINE, 0);
+    lv_obj_set_style_border_width(s_kbTa, 1, 0);
+    lv_obj_set_style_radius(s_kbTa, 6, 0);
+    lv_obj_set_style_text_color(s_kbTa, SY_TEXT, 0);
+    lv_obj_set_style_text_font(s_kbTa, fValue(), 0);
+    lv_obj_set_style_pad_all(s_kbTa, 5, 0);
 
-    char buf[40];
     switch (field) {
-    case 0: lv_textarea_set_text(s_editTa, s_draft.host.c_str());
-            lv_textarea_set_placeholder_text(s_editTa, "192.168.1.10"); break;
-    case 1: lv_textarea_set_text(s_editTa, s_draft.user.c_str());
-            lv_textarea_set_placeholder_text(s_editTa, "account"); break;
+    case 0:
+        lv_textarea_set_text(s_kbTa, s_draft.host.c_str());
+        lv_textarea_set_placeholder_text(s_kbTa, "192.168.1.10");
+        break;
+    case 1:
+        lv_textarea_set_text(s_kbTa, s_draft.user.c_str());
+        lv_textarea_set_placeholder_text(s_kbTa, "account");
+        break;
     case 2:
-        lv_textarea_set_text(s_editTa, s_draft.pass.c_str());
-        lv_textarea_set_password_mode(s_editTa, true);
-        lv_textarea_set_placeholder_text(s_editTa, "password");
+        lv_textarea_set_text(s_kbTa, s_draft.pass.c_str());
+        lv_textarea_set_password_mode(s_kbTa, true);
+        lv_textarea_set_placeholder_text(s_kbTa, "password");
         break;
-    case 3:
+    case 3: {
+        char buf[8];
         snprintf(buf, sizeof(buf), "%u", (unsigned)s_draft.port);
-        lv_textarea_set_text(s_editTa, buf);
-        lv_textarea_set_accepted_chars(s_editTa, "0123456789");
+        lv_textarea_set_text(s_kbTa, buf);
+        lv_textarea_set_accepted_chars(s_kbTa, "0123456789");
         break;
+    }
     default: break;
     }
+    lv_obj_add_state(s_kbTa, LV_STATE_FOCUSED);
 
-    s_editErr = nullptr;
-    mkLabel(panel, "", 10, 70, fSmall(), SY_RED, &s_editErr);
+    s_kbErr = nullptr;
+    mkLabel(panel, "", SY_PAD, 66, fSmall(), SY_RED, &s_kbErr);
 
-    mkButton(panel, "Cancel", 8, 90, 80, 26, SY_PANEL_HI, SY_TEXT, editorCancel_cb, nullptr);
-    if (field == 2) {
-        lv_obj_t *show = mkButton(panel, "Show", 94, 90, 60, 26, SY_PANEL_HI, SY_TEXT,
-                                  editorShow_cb, nullptr);
-        (void)show;
-    }
-    mkButton(panel, "OK", 160, 90, 112, 26, SY_TEAL, SY_DARK, editorOk_cb, nullptr);
+    s_kbCanvas = lv_obj_create(panel);
+    lv_obj_set_pos(s_kbCanvas, SY_PAD, 84);
+    lv_obj_set_size(s_kbCanvas, KB_CW, KB_CH);
+    lv_obj_clear_flag(s_kbCanvas, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(s_kbCanvas, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_kbCanvas, 0, 0);
+    lv_obj_set_style_pad_all(s_kbCanvas, 0, 0);
+    lv_obj_add_event_cb(s_kbCanvas, kbDraw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_event_cb(s_kbCanvas, kbTouch_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(s_kbCanvas, kbTouch_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(s_kbCanvas, kbTouch_cb, LV_EVENT_PRESS_LOST, NULL);
 
-    lv_obj_t *kb = lv_keyboard_create(panel);
-    lv_obj_set_size(kb, 264, 116);
-    lv_obj_set_pos(kb, 8, 120);
-    lv_obj_set_style_bg_color(kb, SY_PANEL, 0);
-    lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, 0);
-    if (field == 3) lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
-    lv_keyboard_set_textarea(kb, s_editTa);
-    lv_obj_add_event_cb(kb, editorKb_cb, LV_EVENT_ALL, nullptr);
+    kbFill();
+    logLvMem("keyboard");
+}
 
-    lv_obj_add_state(s_editTa, LV_STATE_FOCUSED);
+/* kbFill() just repaints; the canvas owns all key state. */
+static void kbFill()
+{
+    if (s_kbCanvas) lv_obj_invalidate(s_kbCanvas);
+}
+
+/* ---- settings rows ---- */
+static void fieldClick_cb(lv_event_t *e)
+{
+    int field = (int)(intptr_t)lv_event_get_user_data(e);
+    if (s_modal) return;
+    kbOpen(field);
 }
 
 static void settingsApplyDraft()
 {
     setTextIfChanged(s_setVal[0], s_draft.host.length() ? s_draft.host.c_str() : "not set");
     setTextIfChanged(s_setVal[1], s_draft.user.length() ? s_draft.user.c_str() : "not set");
-
-    /* The password is never echoed back, only its presence. */
     setTextIfChanged(s_setVal[2], s_draft.pass.length() ? "********" : "not set");
 
     char b[24];
     snprintf(b, sizeof(b), "%s >", s_draft.https ? "HTTPS" : "HTTP");
     setTextIfChanged(s_setVal[3], b);
-
     snprintf(b, sizeof(b), "%u", (unsigned)s_draft.port);
     setTextIfChanged(s_setPort, b);
 }
@@ -1088,7 +1383,6 @@ static void protoToggle_cb(lv_event_t *e)
 {
     (void)e;
     s_draft.https = !s_draft.https;
-    /* Follow the DSM default port when switching protocol. */
     if (s_draft.https && s_draft.port == 5000) s_draft.port = 5001;
     else if (!s_draft.https && s_draft.port == 5001) s_draft.port = 5000;
     settingsApplyDraft();
@@ -1120,7 +1414,7 @@ static void saveBtn_cb(lv_event_t *e)
         lv_obj_set_style_text_color(s_setStatus, SY_RED, 0);
         return;
     }
-    CfgGet(s_draft);        /* pick up the sanitised host/port */
+    CfgGet(s_draft);
     settingsApplyDraft();
     NetApplyConfig();
     setTextIfChanged(s_setStatus, "Saved. Reconnecting...");
@@ -1141,16 +1435,18 @@ static void clearBtn_cb(lv_event_t *e)
 static lv_obj_t *settingRow(lv_obj_t *scr, lv_coord_t y, const char *label,
                             lv_event_cb_t cb, int field, lv_obj_t **valueOut)
 {
-    lv_obj_t *row = mkPanel(scr, 6, y, 268, 30, SY_PANEL, 8);
+    lv_obj_t *row = mkPanel(scr, SY_PAD, y, SY_CONTENT_W, 26, SY_PANEL, 8);
     lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, (void *)(intptr_t)field);
 
-    mkLabel(row, label, 8, 8, fSmall(), SY_MUTED, nullptr);
+    mkLabel(row, label, 8, 6, fSmall(), SY_MUTED, nullptr);
 
     lv_obj_t *v = nullptr;
-    mkLabel(row, "-", 86, 6, fValue(), SY_TEXT, &v);
+    mkLabel(row, "-", 76, 4, fValue(), SY_TEXT, &v);
     lv_obj_set_width(v, 174);
     lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
+    lv_obj_add_flag(v, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(v, cb, LV_EVENT_CLICKED, (void *)(intptr_t)field);
     if (valueOut) *valueOut = v;
     return row;
 }
@@ -1163,19 +1459,19 @@ static void buildSettings()
 
     CfgGet(s_draft);
 
-    settingRow(scr, 30,  "ADDRESS",  fieldClick_cb, 0, &s_setVal[0]);
-    settingRow(scr, 62,  "ACCOUNT",  fieldClick_cb, 1, &s_setVal[1]);
-    settingRow(scr, 94,  "PASSWORD", fieldClick_cb, 2, &s_setVal[2]);
-    settingRow(scr, 126, "PROTOCOL", protoToggle_cb, 0, &s_setVal[3]);
-    settingRow(scr, 158, "PORT",     fieldClick_cb, 3, &s_setPort);
+    settingRow(scr, 40,  "ADDRESS",  fieldClick_cb, 0, &s_setVal[0]);
+    settingRow(scr, 68,  "ACCOUNT",  fieldClick_cb, 1, &s_setVal[1]);
+    settingRow(scr, 96,  "PASSWORD", fieldClick_cb, 2, &s_setVal[2]);
+    settingRow(scr, 124, "PROTOCOL", protoToggle_cb, 0, &s_setVal[3]);
+    settingRow(scr, 152, "PORT",     fieldClick_cb, 3, &s_setPort);
 
-    mkButton(scr, "TEST",  6,  194, 86, 26, SY_PANEL_HI, SY_TEXT, testBtn_cb, nullptr);
-    mkButton(scr, "SAVE",  97, 194, 86, 26, SY_TEAL, SY_DARK, saveBtn_cb, nullptr);
-    mkButton(scr, "CLEAR", 188, 194, 86, 26, SY_PANEL_HI, SY_RED, clearBtn_cb, nullptr);
+    mkButton(scr, "TEST",  SY_PAD, 182, 84, 26, SY_PANEL_HI, SY_TEXT, testBtn_cb, nullptr);
+    mkButton(scr, "SAVE",  98,     182, 84, 26, SY_TEAL, SY_DARK, saveBtn_cb, nullptr);
+    mkButton(scr, "CLEAR", 186,    182, 84, 26, SY_PANEL_HI, SY_RED, clearBtn_cb, nullptr);
 
     s_setStatus = nullptr;
-    mkLabel(scr, "Not connected", 8, 224, fSmall(), SY_MUTED, &s_setStatus);
-    lv_obj_set_width(s_setStatus, 264);
+    mkLabel(scr, "Not connected", SY_PAD, 214, fSmall(), SY_MUTED, &s_setStatus);
+    lv_obj_set_width(s_setStatus, SY_CONTENT_W);
     lv_label_set_long_mode(s_setStatus, LV_LABEL_LONG_DOT);
 
     settingsApplyDraft();
@@ -1205,7 +1501,6 @@ static void settingsRefresh(const Snapshot &s)
     const char *st = connText(s.conn);
     if (s.conn == CONN_ONLINE) {
         if (!s_draft.https) {
-            /* HTTP is not encrypted: say it instead of implying safety. */
             snprintf(buf, sizeof(buf), "ONLINE (HTTP, unencrypted) %s", s.model);
             setTextIfChanged(s_setStatus, buf);
             lv_obj_set_style_text_color(s_setStatus, SY_AMBER, 0);
@@ -1230,7 +1525,6 @@ static bool underFingerBlocked()
     int depth = 0;
     while (o && depth++ < 12) {
         if (lv_obj_check_type(o, &lv_textarea_class)) return true;
-        if (lv_obj_check_type(o, &lv_keyboard_class)) return true;
         if (lv_obj_check_type(o, &lv_btn_class)) return true;
         o = lv_obj_get_parent(o);
     }
@@ -1240,6 +1534,7 @@ static bool underFingerBlocked()
 static lv_scr_load_anim_t animFor(PageId from, PageId to)
 {
     switch (to) {
+    case PAGE_OVERVIEW: return LV_SCR_LOAD_ANIM_MOVE_TOP;
     case PAGE_SETTINGS: return LV_SCR_LOAD_ANIM_MOVE_TOP;
     case PAGE_STORAGE:  return LV_SCR_LOAD_ANIM_MOVE_LEFT;
     case PAGE_SYSTEM:   return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
@@ -1255,30 +1550,36 @@ static lv_scr_load_anim_t animFor(PageId from, PageId to)
 
 void UiNavigate(PageId page, bool animate)
 {
-    if (page >= PAGE_MAX || !s_scr[page]) return;
+    if (page >= PAGE_MAX) return;
+    if (!ensurePage(page)) return;
     if (page == s_cur) return;
 
-    if (s_modal) editorClose();
+    if (s_modal) kbClose();
 
     PageId from = s_cur;
+    bool dropPrev = (from != PAGE_HOME);
+
     s_cur = page;
     NetSetPage(page);
     s_navBlockUntil = millis() + 320;
 
-    lv_scr_load_anim(s_scr[page], animFor(from, page), animate ? 200 : 0, 0, false);
+    lv_scr_load_anim(s_scr[page], animFor(from, page), animate ? 180 : 0, 0, dropPrev);
+    /* LVGL deletes the outgoing page when the animation ends. */
+    if (dropPrev) s_scr[from] = nullptr;
 
     if (page == PAGE_SETTINGS) {
         CfgGet(s_draft);
         settingsApplyDraft();
-    } else if (page == PAGE_STORAGE || page == PAGE_SYSTEM || page == PAGE_UPS) {
+    } else if (page == PAGE_OVERVIEW || page == PAGE_STORAGE ||
+               page == PAGE_SYSTEM || page == PAGE_UPS) {
         NetRequestFast();
     }
 
-    /* Fill the new page immediately from the current snapshot. */
     if (DataLock(20)) {
         Snapshot s = Data();
         DataUnlock();
         if (page == PAGE_HOME) updateHome(s, true);
+        else if (page == PAGE_OVERVIEW) overviewApply(s);
         else if (page == PAGE_STORAGE) storApply(s);
         else if (page == PAGE_SYSTEM) sysApply(s);
         else if (page == PAGE_UPS) upsApply(s);
@@ -1304,19 +1605,21 @@ static void gesture_cb(lv_event_t *e)
     if (dir == LV_DIR_NONE) return;
 
     if (s_cur == PAGE_HOME) {
-        if (dir == LV_DIR_BOTTOM)      UiNavigate(PAGE_SETTINGS, true);
-        else if (dir == LV_DIR_LEFT)   UiNavigate(PAGE_STORAGE, true);
+        if (dir == LV_DIR_LEFT)        UiNavigate(PAGE_STORAGE, true);
         else if (dir == LV_DIR_RIGHT)  UiNavigate(PAGE_SYSTEM, true);
-        /* swipe up on home: already home */
-    } else if (dir == LV_DIR_TOP) {
-        UiNavigate(PAGE_HOME, true);
+        else if (dir == LV_DIR_BOTTOM) UiNavigate(PAGE_SETTINGS, true);
+        else if (dir == LV_DIR_TOP)    UiNavigate(PAGE_OVERVIEW, true);
+        return;
     }
+
+    /* Every sub page is one level deep: any swipe returns home. */
+    UiNavigate(PAGE_HOME, true);
 }
 
 bool UiHandleBack()
 {
     if (s_modal) {
-        editorClose();
+        kbClose();
         return true;
     }
     if (s_cur != PAGE_HOME) {
@@ -1326,43 +1629,73 @@ bool UiHandleBack()
     return false;
 }
 
+/* ================================================== page construction */
+static bool ensurePage(PageId page)
+{
+    if (page >= PAGE_MAX) return false;
+    if (s_scr[page]) return true;
+    buildPage(page);
+    return s_scr[page] != nullptr;
+}
+
+static void buildPage(PageId page)
+{
+    switch (page) {
+    case PAGE_HOME:     if (!s_scr[PAGE_HOME]) buildHome(); break;
+    case PAGE_OVERVIEW: buildOverview(); break;
+    case PAGE_SETTINGS: buildSettings(); break;
+    case PAGE_STORAGE:  buildStorage(); break;
+    case PAGE_SYSTEM:   buildSystem(); break;
+    case PAGE_UPS:      buildUps(); break;
+    default: break;
+    }
+}
+
 /* ================================================================ public */
 void UiBuild(void *bsp)
 {
     s_dev = (CHAPPIE *)bsp;
     s_cur = PAGE_HOME;
     s_storPage = 0;
-    s_chartMB = 0;
-    s_chartPeak = 0.0f;
+    s_peakDown = 0.0;
+    s_peakUp = 0.0;
     s_navBlockUntil = 0;
     s_modal = nullptr;
+    s_lastCpu = -1;
+    s_lastRam = -1;
 
+    stylesInit();
+
+    /* Only the home page is created up front: the other pages are built when
+     * they are opened and freed when they are left, which keeps the 48 KB
+     * LVGL pool free for layers and the keyboard. */
+    for (int i = 0; i < PAGE_MAX; i++) s_scr[i] = nullptr;
     buildHome();
-    buildSettings();
-    buildStorage();
-    buildSystem();
-    buildUps();
 
     NetSetPage(PAGE_HOME);
-    /* The launcher left an empty screen active; replace it. */
-    lv_scr_load_anim(s_scr[PAGE_HOME], LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, true);
+    /* No fade: a whole-screen opacity animation asks for a large layer that
+     * this pool cannot spare. */
+    lv_disp_load_scr(s_scr[PAGE_HOME]);
+    logLvMem("home built");
 }
 
 void UiDestroy()
 {
-    if (s_modal) editorClose();
+    if (s_modal) kbClose();
 
     /* A running lv_scr_load_anim keeps raw pointers to both screens in
-     * lv_disp_t (act/prev/scr_to_load) and animates them. Cancel those
-     * animations and clear the pointers before anything is deleted, so an
-     * exit during a page transition cannot touch freed memory. */
+     * lv_disp_t and animates them; cancel those first. */
     lv_disp_t *d = lv_disp_get_default();
     if (d) {
         for (int i = 0; i < PAGE_MAX; i++) {
             if (s_scr[i]) lv_anim_del(s_scr[i], nullptr);
         }
-        for (int i = 0; i < PAGE_MAX; i++) {
-            if (s_scr[i]) lv_obj_set_pos(s_scr[i], 0, 0);
+        if (d->prev_scr && d->prev_scr != d->act_scr) {
+            bool tracked = false;
+            for (int i = 0; i < PAGE_MAX; i++) {
+                if (s_scr[i] == d->prev_scr) { tracked = true; break; }
+            }
+            if (!tracked) lv_obj_del(d->prev_scr);
         }
         d->scr_to_load = nullptr;
         d->prev_scr = nullptr;
@@ -1370,7 +1703,6 @@ void UiDestroy()
         d->draw_prev_over_act = false;
     }
 
-    /* Never leave the display pointing at a screen we are about to delete. */
     lv_disp_load_scr(lv_obj_create(NULL));
 
     for (int i = 0; i < PAGE_MAX; i++) {
@@ -1382,9 +1714,9 @@ void UiDestroy()
 
     s_cur = PAGE_HOME;
     s_timeLabel = nullptr;
-    s_chart = nullptr;
-    s_serDl = s_serUl = nullptr;
+    s_dlVal = s_ulVal = s_dlPeak = s_ulPeak = nullptr;
     s_dot = s_netState = nullptr;
+    s_ovUser = s_ovProto = s_ovState = s_ovSince = s_ovDuration = s_ovHost = nullptr;
     s_storMsg = s_storPageLbl = nullptr;
     s_storDisk = s_storPrev = s_storNext = nullptr;
     for (int i = 0; i < STOR_CARDS; i++) {
@@ -1392,13 +1724,13 @@ void UiDestroy()
     }
     for (int i = 0; i < SYS_ROWS; i++) s_sysVal[i] = nullptr;
     s_sysNote = nullptr;
-    s_upsBig = nullptr;
-    s_upsNote = nullptr;
-    for (int i = 0; i < 4; i++) {
-        s_upsVal[i] = nullptr;
-        s_setVal[i] = nullptr;
-    }
+    s_upsBig = s_upsSub = s_upsPct = s_upsBar = s_upsRuntime = s_upsModel = s_upsNote = nullptr;
+    for (int i = 0; i < 4; i++) s_setVal[i] = nullptr;
     s_setPort = s_setStatus = nullptr;
+
+    Meter1.METER = Meter2.METER = nullptr;
+    Meter1.INDIC = Meter2.INDIC = nullptr;
+    Meter1.Meter_val_old = Meter2.Meter_val_old = 0;
 }
 
 void UiRefresh()
@@ -1412,33 +1744,40 @@ void UiRefresh()
 
     static uint32_t seenFast = 0, seenSys = 0, seenStor = 0, seenUps = 0;
 
-    /* Labels are refreshed every tick so an online->stale transition shows up
-     * immediately; only a new sample adds a chart point. */
-    updateNetLabels(s);
     if (s.fastSeq != seenFast) {
         seenFast = s.fastSeq;
-        chartPush(s.downBps, s.upBps);
+        if (s.netValid && !s.netStale) {
+            if (s.downBps > s_peakDown) s_peakDown = s.downBps;
+            if (s.upBps > s_peakUp) s_peakUp = s.upBps;
+        }
     }
+
+    if (s_scr[PAGE_HOME]) updateNetLabels(s);
 
     if (s_cur == PAGE_HOME) {
         updateHome(s, false);
+    } else if (s_cur == PAGE_OVERVIEW) {
+        if (s_scr[PAGE_OVERVIEW]) overviewApply(s);
     } else if (s_cur == PAGE_STORAGE) {
+        if (!s_scr[PAGE_STORAGE]) return;
         if (s.storageSeq != seenStor) {
             seenStor = s.storageSeq;
             storApply(s);
         }
     } else if (s_cur == PAGE_SYSTEM) {
+        if (!s_scr[PAGE_SYSTEM]) return;
         if (s.sysSeq != seenSys) {
             seenSys = s.sysSeq;
             sysApply(s);
         }
     } else if (s_cur == PAGE_UPS) {
+        if (!s_scr[PAGE_UPS]) return;
         if (s.upsSeq != seenUps) {
             seenUps = s.upsSeq;
             upsApply(s);
         }
     } else if (s_cur == PAGE_SETTINGS) {
-        settingsRefresh(s);
+        if (s_scr[PAGE_SETTINGS]) settingsRefresh(s);
     }
 }
 
