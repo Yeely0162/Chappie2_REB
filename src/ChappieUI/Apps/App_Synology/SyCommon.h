@@ -26,7 +26,7 @@ enum PageId : uint8_t {
     PAGE_OVERVIEW,      /* swipe up on the home page: connected users */
     PAGE_SETTINGS,
     PAGE_STORAGE,
-    PAGE_DISK,          /* one disk, opened from the storage list */
+    PAGE_VOLUME,        /* one volume + the disks behind it */
     PAGE_SYSTEM,
     PAGE_UPS,
     PAGE_MAX

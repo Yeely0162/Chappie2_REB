@@ -195,7 +195,7 @@ static double s_peakDown = 0.0;
 static double s_peakUp = 0.0;
 
 static void gesture_cb(lv_event_t *e);
-static void diskCard_cb(lv_event_t *e);
+static void volCard_cb(lv_event_t *e);
 static void updateHome(const Snapshot &s, bool force);
 static void buildPage(PageId page);
 static bool ensurePage(PageId page);
@@ -344,16 +344,9 @@ static void fmtRuntime(int32_t sec, char *out, size_t n)
         snprintf(out, n, "%02d:%02d", (int)(sec / 60), (int)(sec % 60));
 }
 
-static lv_color_t usageColor(int pct)
-{
-    if (pct >= 90) return SY_RED;
-    if (pct >= 75) return SY_AMBER;
-    return SY_TEAL;
-}
-
-/* Ring thresholds requested for capacity: <=75 green, 75..90 soft orange-red,
- * >90 soft red. */
-static lv_color_t ringColor(int pct)
+/* One capacity colour rule for the storage bars AND the detail ring:
+ * <=75 % green, >75..90 % soft orange-red, >90 % soft red. */
+static lv_color_t capColor(int pct)
 {
     if (pct > 90) return SY_CRIT;
     if (pct > 75) return SY_WARN;
@@ -778,7 +771,7 @@ static void buildStorage()
         /* chevron: this card opens the disk detail page */
         mkLabel(card, ">", 240, 3, fSmall(), SY_MUTED, nullptr);
 
-        lv_obj_add_event_cb(card, diskCard_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(card, volCard_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
         lv_obj_t *bar = lv_bar_create(card);
         lv_obj_set_pos(bar, 10, 22);
@@ -868,8 +861,8 @@ static void storApply(const Snapshot &s)
         char pb[8];
         snprintf(pb, sizeof(pb), "%d%%", pct);
         setTextIfChanged(s_storPct[i], pb);
-        lv_obj_set_style_text_color(s_storPct[i], usageColor(pct), 0);
-        lv_obj_set_style_bg_color(s_storBar[i], usageColor(pct), LV_PART_INDICATOR);
+        lv_obj_set_style_text_color(s_storPct[i], capColor(pct), 0);
+        lv_obj_set_style_bg_color(s_storBar[i], capColor(pct), LV_PART_INDICATOR);
         lv_bar_set_value(s_storBar[i], pct, LV_ANIM_OFF);
 
         char used[16], total[16], freeb[16];
@@ -908,17 +901,25 @@ static void storApply(const Snapshot &s)
     lv_obj_set_style_text_color(s_storDisk, s.diskWarn > 0 ? SY_AMBER : SY_MUTED, 0);
 }
 
-/* ============================================================ disk page */
-static uint8_t   s_diskIndex = 0;
+/* ==================================================== volume detail page
+ *
+ * The storage list shows VOLUMES (vol_info), so the detail page is keyed by a
+ * volume index. The previous version reused that index against hdd_info[],
+ * which put volume_2 on the Drive 1 page: the two arrays have unrelated order
+ * and the pool ids ("reuse_1") are what link them.
+ */
+static uint8_t   s_volIndex = 0;
 static uint32_t  s_gestureAt = 0;
-static lv_obj_t *s_diskName, *s_diskArc, *s_diskArcPct;
-static lv_obj_t *s_diskVal[4];
-static lv_obj_t *s_diskVol, *s_diskVolInfo, *s_diskBar, *s_diskNote;
+static lv_obj_t *s_volDiskLine;      /* "DISK 1" (or the list of mapped disks) */
+static lv_obj_t *s_volArc, *s_volArcPct;
+static lv_obj_t *s_volName;
+static lv_obj_t *s_volVal[4];        /* USED, TOTAL, TEMP, HEALTH */
+static lv_obj_t *s_volModel;
 
-static void diskCard_cb(lv_event_t *e)
+static void volCard_cb(lv_event_t *e)
 {
-    /* A swipe also fires CLICKED on a non-scrollable object; ignore taps that
-     * follow a page gesture so swiping never opens a disk. */
+    /* A swipe also fires CLICKED on a non-scrollable card; ignore taps that
+     * follow a page gesture so swiping never opens a detail page. */
     if ((int32_t)(millis() - s_gestureAt) < 400) return;
 
     int slot = (int)(intptr_t)lv_event_get_user_data(e);
@@ -926,88 +927,113 @@ static void diskCard_cb(lv_event_t *e)
 
     int have = 0;
     if (DataLock(20)) {
-        have = Data().diskCount;
+        have = Data().volCount;
         DataUnlock();
     }
     if (idx < 0 || idx >= have) return;
 
-    s_diskIndex = (uint8_t)idx;
-    UiNavigate(PAGE_DISK, true);
+    s_volIndex = (uint8_t)idx;
+    UiNavigate(PAGE_VOLUME, true);
 }
 
-static void buildDisk()
+/* "Drive 1" -> 1. The device's own number wins over the array position. */
+static int diskNumber(const DiskInfo &d, int fallbackIdx)
+{
+    int n = 0;
+    bool any = false;
+    for (const char *p = d.name; *p; p++) {
+        if (*p >= '0' && *p <= '9') { n = n * 10 + (*p - '0'); any = true; }
+        else if (any) break;
+    }
+    return any ? n : fallbackIdx + 1;
+}
+
+/* DSM health wording -> {text, colour}. Unknown is never shown as healthy. */
+static const char *healthText(const char *raw, lv_color_t *col)
+{
+    if (!raw || !raw[0]) { *col = SY_MUTED; return "Unknown"; }
+    if (strcmp(raw, "normal") == 0) { *col = SY_GREEN; return "OK"; }
+    if (strstr(raw, "crit") || strstr(raw, "fail") || strstr(raw, "crash")) { *col = SY_CRIT; return raw; }
+    if (strstr(raw, "warn") || strstr(raw, "degrad")) { *col = SY_WARN; return raw; }
+    *col = SY_WARN;
+    return raw;
+}
+
+/* 0 unknown, 1 normal, 2 warning, 3 critical - used to pick the worst disk */
+static int healthRankOf(const char *raw)
+{
+    if (!raw || !raw[0]) return 0;
+    if (strcmp(raw, "normal") == 0) return 1;
+    if (strstr(raw, "crit") || strstr(raw, "fail") || strstr(raw, "crash")) return 3;
+    if (strstr(raw, "warn") || strstr(raw, "degrad")) return 2;
+    return 2;
+}
+
+/* One vertical stack, centred: disk id, usage ring, volume name, four info
+ * rows, then the disk model on a single ellipsised line. */
+static void buildVolume()
 {
     lv_obj_t *scr = newScreen(SY_DARK);
-    s_scr[PAGE_DISK] = scr;
-    pageHeaderBack(scr, "DISK");
+    s_scr[PAGE_VOLUME] = scr;
+    pageHeaderBack(scr, "VOLUME");
 
-    s_diskName = nullptr;
-    mkLabel(scr, "--", SY_PAD, 38, fValue(), SY_TEXT, &s_diskName);
-    lv_obj_set_width(s_diskName, SY_CONTENT_W);
+    s_volDiskLine = nullptr;
+    mkLabel(scr, "--", SY_PAD, 36, fValue(), SY_TEXT, &s_volDiskLine);
+    lv_obj_set_width(s_volDiskLine, SY_CONTENT_W);
+    lv_obj_set_style_text_align(s_volDiskLine, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_volDiskLine, LV_LABEL_LONG_DOT);
 
-    /* ring: capacity usage of the volume on this disk's pool (or "n/a") */
-    s_diskArc = lv_arc_create(scr);
-    lv_obj_set_pos(s_diskArc, SY_PAD, 60);
-    lv_obj_set_size(s_diskArc, 84, 84);
-    lv_arc_set_rotation(s_diskArc, 270);
-    lv_arc_set_bg_angles(s_diskArc, 0, 360);
-    lv_arc_set_range(s_diskArc, 0, 100);
-    lv_arc_set_value(s_diskArc, 0);
-    lv_obj_remove_style(s_diskArc, NULL, LV_PART_KNOB);
-    lv_obj_clear_flag(s_diskArc, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_opa(s_diskArc, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_diskArc, 0, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_diskArc, 8, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_diskArc, 8, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(s_diskArc, SY_LINE, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(s_diskArc, SY_GREEN, LV_PART_INDICATOR);
+    s_volArc = lv_arc_create(scr);
+    lv_obj_set_pos(s_volArc, 105, 56);          /* 70 px ring, centred on x=140 */
+    lv_obj_set_size(s_volArc, 70, 70);
+    lv_arc_set_rotation(s_volArc, 270);
+    lv_arc_set_bg_angles(s_volArc, 0, 360);
+    lv_arc_set_range(s_volArc, 0, 100);
+    lv_arc_set_value(s_volArc, 0);
+    lv_obj_remove_style(s_volArc, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(s_volArc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_opa(s_volArc, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_volArc, 0, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_volArc, 8, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_volArc, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_volArc, SY_LINE, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_volArc, SY_GREEN, LV_PART_INDICATOR);
 
-    s_diskArcPct = nullptr;
-    mkLabel(s_diskArc, "--", 0, 0, fValue(), SY_TEXT, &s_diskArcPct);
-    lv_obj_set_width(s_diskArcPct, 60);
-    lv_obj_set_style_text_align(s_diskArcPct, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_diskArcPct, LV_ALIGN_CENTER, 0, 0);
+    s_volArcPct = nullptr;
+    mkLabel(s_volArc, "--", 0, 0, fBold18(), SY_TEXT, &s_volArcPct);
+    lv_obj_set_width(s_volArcPct, 60);
+    lv_obj_set_style_text_align(s_volArcPct, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_volArcPct, LV_ALIGN_CENTER, 0, 0);
 
-    static const char *cap[4] = { "MODEL", "TEMP", "HEALTH", "CAPACITY" };
+    s_volName = nullptr;
+    mkLabel(scr, "--", SY_PAD, 129, fValue(), SY_TEXT, &s_volName);
+    lv_obj_set_width(s_volName, SY_CONTENT_W);
+    lv_obj_set_style_text_align(s_volName, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_volName, LV_LABEL_LONG_DOT);
+
+    /* USED / TOTAL describe the volume, TEMP / HEALTH the disk listed above. */
+    static const char *cap[4] = { "USED", "TOTAL", "TEMP", "HEALTH" };
     for (int i = 0; i < 4; i++) {
-        lv_coord_t y = 62 + i * 22;
-        mkLabel(scr, cap[i], 104, y + 3, fSmall(), SY_MUTED, nullptr);
-        s_diskVal[i] = nullptr;
-        mkLabel(scr, "--", 150, y + 2, fSmall(), SY_TEXT, &s_diskVal[i]);
-        lv_obj_set_width(s_diskVal[i], 120);
-        lv_obj_set_style_text_align(s_diskVal[i], LV_TEXT_ALIGN_RIGHT, 0);
-        lv_label_set_long_mode(s_diskVal[i], LV_LABEL_LONG_DOT);
+        lv_coord_t y = 150 + i * 16;
+        mkLabel(scr, cap[i], SY_PAD, y, fSmall(), SY_MUTED, nullptr);
+
+        s_volVal[i] = nullptr;
+        mkLabel(scr, "--", 140, y - 1, fText(), SY_TEXT, &s_volVal[i]);
+        lv_obj_set_width(s_volVal[i], 130);
+        lv_obj_set_style_text_align(s_volVal[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_long_mode(s_volVal[i], LV_LABEL_LONG_DOT);
     }
 
-    s_diskVol = nullptr;
-    mkLabel(scr, "", SY_PAD, 156, fSmall(), SY_MUTED, &s_diskVol);
-    lv_obj_set_width(s_diskVol, SY_CONTENT_W);
-    lv_label_set_long_mode(s_diskVol, LV_LABEL_LONG_DOT);
-
-    s_diskVolInfo = nullptr;
-    mkLabel(scr, "", SY_PAD, 172, fSmall(), SY_MUTED, &s_diskVolInfo);
-    lv_obj_set_width(s_diskVolInfo, SY_CONTENT_W);
-    lv_label_set_long_mode(s_diskVolInfo, LV_LABEL_LONG_DOT);
-
-    s_diskBar = lv_bar_create(scr);
-    lv_obj_set_pos(s_diskBar, SY_PAD, 190);
-    lv_obj_set_size(s_diskBar, SY_CONTENT_W, 6);
-    lv_obj_set_style_bg_color(s_diskBar, SY_LINE, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_diskBar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_diskBar, SY_GREEN, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(s_diskBar, 3, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_diskBar, 3, LV_PART_INDICATOR);
-    lv_bar_set_range(s_diskBar, 0, 100);
-
-    s_diskNote = nullptr;
-    mkLabel(scr, "", SY_PAD, 208, fSmall(), SY_MUTED, &s_diskNote);
-    lv_obj_set_size(s_diskNote, SY_CONTENT_W, 18);
-    lv_label_set_long_mode(s_diskNote, LV_LABEL_LONG_DOT);
+    mkLabel(scr, "MODEL", SY_PAD, 216, fSmall(), SY_MUTED, nullptr);
+    s_volModel = nullptr;
+    mkLabel(scr, "--", 62, 215, fText(), SY_TEXT, &s_volModel);
+    lv_obj_set_width(s_volModel, 208);
+    lv_label_set_long_mode(s_volModel, LV_LABEL_LONG_DOT);
 }
 
 /* A pool id such as "reuse_1" maps to the volume whose name ends with "_1".
- * Only used when exactly one volume matches; otherwise the mapping is
- * ambiguous and no usage is shown. */
+ * Only used when exactly one volume matches; otherwise the relation is
+ * ambiguous and nothing is claimed. */
 static int volForPool(const Snapshot &s, const char *pool)
 {
     if (!pool || !pool[0]) return -1;
@@ -1020,98 +1046,132 @@ static int volForPool(const Snapshot &s, const char *pool)
         size_t sl = strlen(suffix);
         if (len <= sl) continue;
         if (strcmp(s.vols[i].name + len - sl, suffix) != 0) continue;
-        if (found >= 0) return -1;      /* ambiguous */
+        if (found >= 0) return -1;      /* more than one candidate */
         found = i;
     }
     return found;
 }
 
-static void diskApply(const Snapshot &s)
+/* Which disks sit behind a volume: disk.pool -> volume, using the same
+ * pool-id -> volume-name rule as the ring. */
+static bool diskInVolume(const Snapshot &s, const DiskInfo &d, int volIdx)
 {
-    if (!s.storageValid || s_diskIndex >= s.diskCount) {
-        setTextIfChanged(s_diskName, "No disk data");
+    return volForPool(s, d.pool) == volIdx;
+}
+
+static void volApply(const Snapshot &s)
+{
+    if (!s.storageValid || s_volIndex >= s.volCount) {
+        setTextIfChanged(s_volName, "No volume data");
+        setTextIfChanged(s_volDiskLine, "");
+        for (int i = 0; i < 4; i++) setTextIfChanged(s_volVal[i], "--");
+        setTextIfChanged(s_volModel, "--");
         return;
     }
-    const DiskInfo &d = s.disks[s_diskIndex];
-    char b[72];
 
-    setTextIfChanged(s_diskName, d.name[0] ? d.name : "Disk");
+    const VolumeInfo &v = s.vols[s_volIndex];
+    char b[80];
 
-    setTextIfChanged(s_diskVal[0], d.model[0] ? d.model : "n/a");
+    /* volume identity */
+    setTextIfChanged(s_volName, v.name[0] ? v.name : "volume");
 
-    if (d.temp >= 0) snprintf(b, sizeof(b), "%d C", (int)d.temp);
-    else             snprintf(b, sizeof(b), "n/a");
-    setTextIfChanged(s_diskVal[1], b);
-    lv_obj_set_style_text_color(s_diskVal[1], d.temp >= 55 ? SY_WARN : SY_TEXT, 0);
+    uint64_t used = v.used > v.total ? v.total : v.used;
+    int pct = (v.total > 0) ? (int)((used * 100ULL) / v.total) : -1;
+    if (pct > 100) pct = 100;
 
-    /* Health is DSM's own status word; it is not derived from the temperature. */
-    const char *health = d.status;
-    lv_color_t hc = SY_MUTED;
-    if (!health[0]) {
-        setTextIfChanged(s_diskVal[2], "Unknown");
-    } else if (strcmp(health, "normal") == 0) {
-        setTextIfChanged(s_diskVal[2], "Healthy");
-        hc = SY_GREEN;
-    } else if (strstr(health, "crit") || strstr(health, "fail") || strstr(health, "crash")) {
-        setTextIfChanged(s_diskVal[2], health);
-        hc = SY_CRIT;
-    } else if (strstr(health, "warn") || strstr(health, "degrad")) {
-        setTextIfChanged(s_diskVal[2], health);
-        hc = SY_WARN;
-    } else {
-        setTextIfChanged(s_diskVal[2], health);
-        hc = SY_WARN;      /* unrecognised word: never shown as healthy */
-    }
-    lv_obj_set_style_text_color(s_diskVal[2], hc, 0);
-
-    if (d.capacity > 0) {
-        fmtBytes(d.capacity, b, sizeof(b));
-        setTextIfChanged(s_diskVal[3], b);
-    } else {
-        setTextIfChanged(s_diskVal[3], "n/a");
-    }
-
-    /* Ring = usage of the VOLUME living on this disk's pool, never "disk used". */
-    int vi = volForPool(s, d.pool);
-    if (vi >= 0 && s.vols[vi].total > 0) {
-        const VolumeInfo &v = s.vols[vi];
-        uint64_t used = v.used > v.total ? v.total : v.used;
-        int pct = (int)((used * 100ULL) / v.total);
-        if (pct > 100) pct = 100;
-
-        snprintf(b, sizeof(b), "VOLUME %s", v.name);
-        setTextIfChanged(s_diskVol, b);
-
-        char u[16], t[16];
-        fmtBytes(used, u, sizeof(u));
-        fmtBytes(v.total, t, sizeof(t));
-        snprintf(b, sizeof(b), "%s used / %s (%d%%)", u, t, pct);
-        setTextIfChanged(s_diskVolInfo, b);
-
-        lv_obj_clear_flag(s_diskBar, LV_OBJ_FLAG_HIDDEN);
-        lv_arc_set_value(s_diskArc, pct);
-        lv_obj_set_style_arc_color(s_diskArc, ringColor(pct), LV_PART_INDICATOR);
-        lv_obj_set_style_bg_color(s_diskBar, ringColor(pct), LV_PART_INDICATOR);
-        lv_bar_set_value(s_diskBar, pct, LV_ANIM_OFF);
-
+    if (pct >= 0) {
+        lv_arc_set_value(s_volArc, pct);
+        lv_obj_set_style_arc_color(s_volArc, capColor(pct), LV_PART_INDICATOR);
         char pb[8];
         snprintf(pb, sizeof(pb), "%d%%", pct);
-        setTextIfChanged(s_diskArcPct, pb);
-        lv_obj_set_style_text_color(s_diskArcPct, ringColor(pct), 0);
+        setTextIfChanged(s_volArcPct, pb);
+        lv_obj_set_style_text_color(s_volArcPct, capColor(pct), 0);
     } else {
-        /* No 1:1 pool -> volume mapping: draw no proportion at all. */
-        setTextIfChanged(s_diskVol, "VOLUME USAGE n/a");
-        setTextIfChanged(s_diskVolInfo, "No volume mapping recorded by DSM");
-        lv_arc_set_value(s_diskArc, 0);
-        lv_obj_set_style_arc_color(s_diskArc, SY_LINE, LV_PART_INDICATOR);
-        lv_obj_add_flag(s_diskBar, LV_OBJ_FLAG_HIDDEN);
-        setTextIfChanged(s_diskArcPct, "n/a");
-        lv_obj_set_style_text_color(s_diskArcPct, SY_MUTED, 0);
+        /* No usable size from the API: no proportion is drawn. */
+        lv_arc_set_value(s_volArc, 0);
+        lv_obj_set_style_arc_color(s_volArc, SY_LINE, LV_PART_INDICATOR);
+        setTextIfChanged(s_volArcPct, "--");
+        lv_obj_set_style_text_color(s_volArcPct, SY_MUTED, 0);
     }
 
-    if (d.pool[0]) snprintf(b, sizeof(b), "pool %s", d.pool);
-    else           b[0] = 0;
-    setTextIfChanged(s_diskNote, b);
+    if (v.total > 0) {
+        fmtBytes(used, b, sizeof(b));
+        setTextIfChanged(s_volVal[0], b);
+        fmtBytes(v.total, b, sizeof(b));
+        setTextIfChanged(s_volVal[1], b);
+    } else {
+        setTextIfChanged(s_volVal[0], "--");
+        setTextIfChanged(s_volVal[1], "--");
+    }
+
+    /* disks behind this volume (pool -> volume); list them all, never assume
+     * the volume is one physical drive. */
+    const DiskInfo *disks[3] = { nullptr, nullptr, nullptr };
+    int count = 0;
+    for (int i = 0; i < s.diskCount && i < SY_MAX_DISKS && count < 3; i++) {
+        if (diskInVolume(s, s.disks[i], s_volIndex)) disks[count++] = &s.disks[i];
+    }
+
+    if (count == 0) {
+        setTextIfChanged(s_volDiskLine, "NO DISK MAPPED");
+        lv_obj_set_style_text_color(s_volDiskLine, SY_MUTED, 0);
+
+        setTextIfChanged(s_volVal[2], "--");
+        lv_obj_set_style_text_color(s_volVal[2], SY_MUTED, 0);
+        setTextIfChanged(s_volVal[3], "Unknown");
+        lv_obj_set_style_text_color(s_volVal[3], SY_MUTED, 0);
+        setTextIfChanged(s_volModel, "--");
+        return;
+    }
+
+    /* disk id line: "DISK 1" or "DISK 1, DISK 2" */
+    b[0] = 0;
+    for (int i = 0; i < count; i++) {
+        char one[16];
+        snprintf(one, sizeof(one), "%sDISK %d", i ? ", " : "",
+                 diskNumber(*disks[i], (int)(disks[i] - s.disks)));
+        strncat(b, one, sizeof(b) - strlen(b) - 1);
+    }
+    setTextIfChanged(s_volDiskLine, b);
+    lv_obj_set_style_text_color(s_volDiskLine, SY_TEXT, 0);
+
+    /* temperature: one disk -> "38 C"; several -> "38/37 C" */
+    int temps[3];
+    int tCount = 0;
+    for (int i = 0; i < count; i++) {
+        if (disks[i]->temp >= 0) temps[tCount++] = disks[i]->temp;
+    }
+    if (tCount == 0) {
+        setTextIfChanged(s_volVal[2], "--");
+        lv_obj_set_style_text_color(s_volVal[2], SY_MUTED, 0);
+    } else {
+        b[0] = 0;
+        for (int i = 0; i < tCount; i++) {
+            char one[8];
+            snprintf(one, sizeof(one), "%s%d", i ? "/" : "", temps[i]);
+            strncat(b, one, sizeof(b) - strlen(b) - 1);
+        }
+        strncat(b, " C", sizeof(b) - strlen(b) - 1);
+        setTextIfChanged(s_volVal[2], b);
+        lv_obj_set_style_text_color(s_volVal[2],
+                                    temps[0] >= 55 ? SY_WARN : SY_TEXT, 0);
+    }
+
+    /* health: the worst state of the mapped disks, never "OK" by default */
+    int worstIdx = 0;
+    int worstRank = -1;
+    for (int i = 0; i < count; i++) {
+        int r = healthRankOf(disks[i]->status);
+        if (r > worstRank) { worstRank = r; worstIdx = i; }
+    }
+    lv_color_t worstCol = SY_MUTED;
+    const char *worst = healthText(disks[worstIdx]->status, &worstCol);
+    setTextIfChanged(s_volVal[3], worst);
+    lv_obj_set_style_text_color(s_volVal[3], worstCol, 0);
+
+    /* model of the first disk; long models are ellipsised by LV_LABEL_LONG_DOT */
+    setTextIfChanged(s_volModel, disks[0]->model[0] ? disks[0]->model : "--");
+    lv_obj_set_style_text_color(s_volModel, SY_TEXT, 0);
 }
 
 /* =========================================================== system page */
@@ -1863,14 +1923,14 @@ static lv_scr_load_anim_t animFor(PageId from, PageId to)
     case PAGE_SETTINGS: return LV_SCR_LOAD_ANIM_MOVE_TOP;
     case PAGE_STORAGE:  return LV_SCR_LOAD_ANIM_MOVE_LEFT;
     case PAGE_SYSTEM:   return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
-    case PAGE_DISK:     return LV_SCR_LOAD_ANIM_MOVE_LEFT;
+    case PAGE_VOLUME:     return LV_SCR_LOAD_ANIM_MOVE_LEFT;
     case PAGE_UPS:      return LV_SCR_LOAD_ANIM_MOVE_LEFT;
     case PAGE_HOME:
     default:
         if (from == PAGE_STORAGE) return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
         if (from == PAGE_SYSTEM)  return LV_SCR_LOAD_ANIM_MOVE_LEFT;
         if (from == PAGE_UPS)     return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
-        if (from == PAGE_DISK)    return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
+        if (from == PAGE_VOLUME)    return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
         return LV_SCR_LOAD_ANIM_MOVE_BOTTOM;
     }
 }
@@ -1897,7 +1957,7 @@ void UiNavigate(PageId page, bool animate)
     if (page == PAGE_SETTINGS) {
         CfgGet(s_draft);
         settingsApplyDraft();
-    } else if (page == PAGE_OVERVIEW || page == PAGE_STORAGE || page == PAGE_DISK ||
+    } else if (page == PAGE_OVERVIEW || page == PAGE_STORAGE || page == PAGE_VOLUME ||
                page == PAGE_SYSTEM || page == PAGE_UPS) {
         NetRequestFast();
     }
@@ -1908,7 +1968,7 @@ void UiNavigate(PageId page, bool animate)
         if (page == PAGE_HOME) updateHome(s, true);
         else if (page == PAGE_OVERVIEW) overviewApply(s);
         else if (page == PAGE_STORAGE) storApply(s);
-        else if (page == PAGE_DISK) diskApply(s);
+        else if (page == PAGE_VOLUME) volApply(s);
         else if (page == PAGE_SYSTEM) sysApply(s);
         else if (page == PAGE_UPS) upsApply(s);
         else if (page == PAGE_SETTINGS) settingsRefresh(s);
@@ -1957,7 +2017,7 @@ static void gesture_cb(lv_event_t *e)
     }
 
     /* The disk page is one level below storage: go back to the list. */
-    if (s_cur == PAGE_DISK) {
+    if (s_cur == PAGE_VOLUME) {
         UiNavigate(PAGE_STORAGE, true);
         return;
     }
@@ -1995,7 +2055,7 @@ static void buildPage(PageId page)
     case PAGE_OVERVIEW: buildOverview(); break;
     case PAGE_SETTINGS: buildSettings(); break;
     case PAGE_STORAGE:  buildStorage(); break;
-    case PAGE_DISK:     buildDisk(); break;
+    case PAGE_VOLUME:     buildVolume(); break;
     case PAGE_SYSTEM:   buildSystem(); break;
     case PAGE_UPS:      buildUps(); break;
     default: break;
@@ -2014,7 +2074,7 @@ void UiBuild(void *bsp)
     s_modal = nullptr;
     s_lastCpu = -1;
     s_lastRam = -1;
-    s_diskIndex = 0;
+    s_volIndex = 0;
     s_gestureAt = 0;
 
     stylesInit();
@@ -2073,10 +2133,8 @@ void UiDestroy()
     for (int i = 0; i < SY_MAX_SESSIONS; i++) {
         s_usrDot[i] = s_usrName[i] = s_usrProto[i] = s_usrTime[i] = nullptr;
     }
-    s_diskName = s_diskArc = s_diskArcPct = nullptr;
-    s_diskVol = s_diskVolInfo = s_diskNote = nullptr;
-    s_diskBar = nullptr;
-    for (int i = 0; i < 4; i++) s_diskVal[i] = nullptr;
+    s_volDiskLine = s_volArc = s_volArcPct = s_volName = s_volModel = nullptr;
+    for (int i = 0; i < 4; i++) s_volVal[i] = nullptr;
     s_storMsg = s_storPageLbl = nullptr;
     s_storDisk = s_storPrev = s_storNext = nullptr;
     for (int i = 0; i < STOR_CARDS; i++) {
@@ -2126,11 +2184,11 @@ void UiRefresh()
             seenStor = s.storageSeq;
             storApply(s);
         }
-    } else if (s_cur == PAGE_DISK) {
-        if (!s_scr[PAGE_DISK]) return;
+    } else if (s_cur == PAGE_VOLUME) {
+        if (!s_scr[PAGE_VOLUME]) return;
         if (s.storageSeq != seenStor) {
             seenStor = s.storageSeq;
-            diskApply(s);
+            volApply(s);
         }
     } else if (s_cur == PAGE_SYSTEM) {
         if (!s_scr[PAGE_SYSTEM]) return;

@@ -341,7 +341,6 @@ Snapshot &Data()
 {
     return s_data;
 }
-
 /* ------------------------------------------------------------ task count */
 static void taskCountAdd(int delta)
 {
