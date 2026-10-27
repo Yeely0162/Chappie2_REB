@@ -31,6 +31,10 @@ namespace Sy {
 #define SY_TEAL      lv_color_hex(0x18C7A8)
 #define SY_AMBER     lv_color_hex(0xFFB02E)
 #define SY_RED       lv_color_hex(0xE5484D)
+#define SY_GREEN     lv_color_hex(0x53DE77)   /* project green: healthy / normal */
+#define SY_ONLINE    lv_color_hex(0x34C759)   /* ONLINE status dot */
+#define SY_WARN      lv_color_hex(0xFF8F5A)   /* soft orange-red: warning */
+#define SY_CRIT      lv_color_hex(0xD9534F)   /* soft red: critical */
 
 #define SY_W 280
 #define SY_H 240
@@ -191,6 +195,7 @@ static double s_peakDown = 0.0;
 static double s_peakUp = 0.0;
 
 static void gesture_cb(lv_event_t *e);
+static void diskCard_cb(lv_event_t *e);
 static void updateHome(const Snapshot &s, bool force);
 static void buildPage(PageId page);
 static bool ensurePage(PageId page);
@@ -275,12 +280,25 @@ static void homeBtn_cb(lv_event_t *e)
     UiNavigate(PAGE_HOME, true);
 }
 
-/* Title bar: title and HOME button 10 px from the screen edges. */
+/* Title bar: title and the right-hand button 10 px from the screen edges. */
 static void pageHeader(lv_obj_t *scr, const char *title)
 {
     lv_obj_t *bar = mkPanel(scr, 0, 0, SY_W, 34, SY_DARK, 0);
     mkLabel(bar, title, SY_PAD, 10, fValue(), SY_TEXT, nullptr);
     mkButton(bar, "HOME", 220, 10, 50, 20, SY_PANEL, SY_MUTED, homeBtn_cb, nullptr);
+}
+
+static void backToStorage_cb(lv_event_t *e)
+{
+    (void)e;
+    UiNavigate(PAGE_STORAGE, true);
+}
+
+static void pageHeaderBack(lv_obj_t *scr, const char *title)
+{
+    lv_obj_t *bar = mkPanel(scr, 0, 0, SY_W, 34, SY_DARK, 0);
+    mkLabel(bar, title, SY_PAD, 10, fValue(), SY_TEXT, nullptr);
+    mkButton(bar, "BACK", 214, 10, 56, 20, SY_PANEL, SY_MUTED, backToStorage_cb, nullptr);
 }
 
 /* --------------------------------------------------------- formatting */
@@ -333,9 +351,19 @@ static lv_color_t usageColor(int pct)
     return SY_TEAL;
 }
 
+/* Ring thresholds requested for capacity: <=75 green, 75..90 soft orange-red,
+ * >90 soft red. */
+static lv_color_t ringColor(int pct)
+{
+    if (pct > 90) return SY_CRIT;
+    if (pct > 75) return SY_WARN;
+    return SY_GREEN;
+}
+
 /* ============================================================ home page */
 static lv_obj_t *s_timeLabel;
 static lv_obj_t *s_dlVal, *s_ulVal, *s_dlPeak, *s_ulPeak, *s_netState, *s_dot;
+static lv_obj_t *s_dlBar, *s_ulBar;
 static int16_t s_lastCpu = -1, s_lastRam = -1;
 
 static void buildHome()
@@ -353,26 +381,15 @@ static void buildHome()
     lv_label_set_text(s_timeLabel, "Init...");
     lv_obj_set_style_text_color(s_timeLabel, lv_color_hex(0x8F8F8F), 0);
 
-    /* network block: 10 px from left, right and bottom edges */
-    lv_obj_t *panel = mkPanel(scr, SY_PAD, 150, SY_CONTENT_W, 80, SY_PANEL, 12);
-
-    mkLabel(panel, LV_SYMBOL_DOWN, 10, 8, fSymbol(), SY_TEAL, nullptr);
-    mkLabel(panel, "--", 28, 3, fBold18(), SY_TEAL, &s_dlVal);
-    lv_obj_set_width(s_dlVal, 96);
-    mkLabel(panel, "MAX --", 126, 9, fSmall(), SY_MUTED, &s_dlPeak);
-    lv_obj_set_width(s_dlPeak, 124);
-    lv_obj_set_style_text_align(s_dlPeak, LV_TEXT_ALIGN_RIGHT, 0);
-
-    mkLabel(panel, LV_SYMBOL_UP, 10, 34, fSymbol(), SY_AMBER, nullptr);
-    mkLabel(panel, "--", 28, 29, fBold18(), SY_AMBER, &s_ulVal);
-    lv_obj_set_width(s_ulVal, 96);
-    mkLabel(panel, "MAX --", 126, 35, fSmall(), SY_MUTED, &s_ulPeak);
-    lv_obj_set_width(s_ulPeak, 124);
-    lv_obj_set_style_text_align(s_ulPeak, LV_TEXT_ALIGN_RIGHT, 0);
+    /* network block: 10 px from the left, right and bottom edges.
+     *   status row: dot + ONLINE + interface name
+     *   two columns: UPLOAD (amber) and DOWNLOAD (teal), current rate large,
+     *   session peak below, and a thin activity bar under each column. */
+    lv_obj_t *panel = mkPanel(scr, SY_PAD, 148, SY_CONTENT_W, 82, SY_PANEL, 12);
 
     s_dot = lv_obj_create(panel);
-    lv_obj_set_size(s_dot, 7, 7);
-    lv_obj_set_pos(s_dot, 10, 64);
+    lv_obj_set_size(s_dot, 8, 8);
+    lv_obj_set_pos(s_dot, 10, 8);
     lv_obj_set_style_radius(s_dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(s_dot, SY_MUTED, 0);
     lv_obj_set_style_bg_opa(s_dot, LV_OPA_COVER, 0);
@@ -380,8 +397,47 @@ static void buildHome()
     lv_obj_clear_flag(s_dot, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(s_dot, LV_OBJ_FLAG_SCROLLABLE);
 
-    mkLabel(panel, "INIT", 20, 58, fSmall(), SY_MUTED, &s_netState);
-    lv_obj_set_width(s_netState, 236);
+    mkLabel(panel, "INIT", 22, 5, fSmall(), SY_MUTED, &s_netState);
+    lv_obj_set_width(s_netState, 228);
+
+    /* upload column */
+    mkLabel(panel, LV_SYMBOL_UP, 10, 25, fSymbol(), SY_AMBER, nullptr);
+    mkLabel(panel, "UPLOAD", 26, 24, fSmall(), SY_MUTED, nullptr);
+    mkLabel(panel, "--", 10, 36, fBold18(), SY_AMBER, &s_ulVal);
+    lv_obj_set_width(s_ulVal, 112);
+    mkLabel(panel, "MAX --", 10, 58, fSmall(), SY_MUTED, &s_ulPeak);
+    lv_obj_set_width(s_ulPeak, 112);
+
+    /* download column */
+    mkLabel(panel, LV_SYMBOL_DOWN, 134, 25, fSymbol(), SY_TEAL, nullptr);
+    mkLabel(panel, "DOWNLOAD", 150, 24, fSmall(), SY_MUTED, nullptr);
+    mkLabel(panel, "--", 134, 36, fBold18(), SY_TEAL, &s_dlVal);
+    lv_obj_set_width(s_dlVal, 112);
+    mkLabel(panel, "MAX --", 134, 58, fSmall(), SY_MUTED, &s_dlPeak);
+    lv_obj_set_width(s_dlPeak, 112);
+
+    /* activity bars (same scale for both columns) */
+    s_ulBar = lv_bar_create(panel);
+    lv_obj_set_pos(s_ulBar, 10, 74);
+    lv_obj_set_size(s_ulBar, 112, 4);
+    lv_obj_set_style_bg_color(s_ulBar, SY_LINE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_ulBar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_ulBar, SY_AMBER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_ulBar, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_ulBar, 2, LV_PART_INDICATOR);
+    lv_bar_set_range(s_ulBar, 0, 1000);
+    lv_bar_set_value(s_ulBar, 0, LV_ANIM_OFF);
+
+    s_dlBar = lv_bar_create(panel);
+    lv_obj_set_pos(s_dlBar, 134, 74);
+    lv_obj_set_size(s_dlBar, 112, 4);
+    lv_obj_set_style_bg_color(s_dlBar, SY_LINE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_dlBar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_dlBar, SY_TEAL, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_dlBar, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_dlBar, 2, LV_PART_INDICATOR);
+    lv_bar_set_range(s_dlBar, 0, 1000);
+    lv_bar_set_value(s_dlBar, 0, LV_ANIM_OFF);
 }
 
 static const char *connText(ConnState c)
@@ -433,30 +489,50 @@ static void updateNetLabels(const Snapshot &s)
 
     lv_obj_set_style_text_color(s_dlVal, live ? SY_TEAL : SY_MUTED, 0);
     lv_obj_set_style_text_color(s_ulVal, live ? SY_AMBER : SY_MUTED, 0);
+
+    /* Both bars share one scale (the larger peak) so the two columns can be
+     * compared; the bar is an activity indicator, the numbers are the truth. */
+    double top = s_peakDown > s_peakUp ? s_peakDown : s_peakUp;
+    if (top < 1024.0) top = 1024.0;
+    int dv = live ? (int)((double)s.downBps * 1000.0 / top) : 0;
+    int uv = live ? (int)((double)s.upBps * 1000.0 / top) : 0;
+    if (dv < 0) dv = 0;
+    if (dv > 1000) dv = 1000;
+    if (uv < 0) uv = 0;
+    if (uv > 1000) uv = 1000;
+    lv_bar_set_value(s_dlBar, dv, LV_ANIM_OFF);
+    lv_bar_set_value(s_ulBar, uv, LV_ANIM_OFF);
 }
 
+/* Status row inside the network panel: green #34C759 only when the NAS is
+ * reachable AND the interface reports a link; every other state says why. */
 static void updateStatusLine(const Snapshot &s)
 {
-    lv_color_t col = connColor(s.conn);
+    bool online = (s.conn == CONN_ONLINE);
+    bool linkOk = (!s.linkValid) || s.linkUp;
+    bool live = online && s.netValid && !s.netStale && linkOk;
+
+    lv_color_t col;
+    if (live)                                       col = SY_ONLINE;
+    else if (s.conn == CONN_CONNECTING)             col = SY_AMBER;
+    else if (s.conn == CONN_AUTH_FAIL ||
+             s.conn == CONN_ERROR)                  col = SY_RED;
+    else                                            col = SY_MUTED;
     lv_obj_set_style_bg_color(s_dot, col, 0);
 
-    char buf[96];
-    if (s.conn == CONN_ONLINE) {
-        uint32_t age = s.lastFastMs ? (millis() - s.lastFastMs) / 1000 : 0;
-        if (age > 999) age = 999;
-
-        if (s.netStale)                     snprintf(buf, sizeof(buf), "ONLINE  stale %us", (unsigned)age);
-        else if (s.linkValid && s.linkName[0] && !s.linkUp)
-                                            snprintf(buf, sizeof(buf), "ONLINE  %s DOWN  %us", s.linkName, (unsigned)age);
-        else if (s.nic[0])                  snprintf(buf, sizeof(buf), "ONLINE  %s  %us", s.nic, (unsigned)age);
-        else                                snprintf(buf, sizeof(buf), "ONLINE  %us", (unsigned)age);
+    char buf[72];
+    if (online) {
+        const char *ifname = s.nic[0] ? s.nic : (s.linkName[0] ? s.linkName : "?");
+        if (s.netStale)                          snprintf(buf, sizeof(buf), "STALE  %s", ifname);
+        else if (s.linkValid && !s.linkUp)       snprintf(buf, sizeof(buf), "LINK DOWN  %s", s.linkName);
+        else                                     snprintf(buf, sizeof(buf), "ONLINE  %s", ifname);
+    } else if (s.msg[0]) {
+        snprintf(buf, sizeof(buf), "%s  %s", connText(s.conn), s.msg);
     } else {
-        const char *base = connText(s.conn);
-        if (s.msg[0]) snprintf(buf, sizeof(buf), "%s  %s", base, s.msg);
-        else          snprintf(buf, sizeof(buf), "%s", base);
+        snprintf(buf, sizeof(buf), "%s", connText(s.conn));
     }
     setTextIfChanged(s_netState, buf);
-    lv_obj_set_style_text_color(s_netState, col, 0);
+    lv_obj_set_style_text_color(s_netState, live ? SY_TEXT : col, 0);
 }
 
 static void updateHome(const Snapshot &s, bool force)
@@ -487,118 +563,156 @@ static void updateHome(const Snapshot &s, bool force)
     updateStatusLine(s);
 }
 
-/* ============================================== overview (session) page */
-static lv_obj_t *s_ovUser, *s_ovProto, *s_ovState, *s_ovSince, *s_ovDuration, *s_ovHost;
+/* =========================================== overview: connected users */
+static lv_obj_t *s_usrList;
+static lv_obj_t *s_usrMsg;
+static lv_obj_t *s_usrNote;
+static lv_obj_t *s_usrDot[SY_MAX_SESSIONS];
+static lv_obj_t *s_usrName[SY_MAX_SESSIONS];
+static lv_obj_t *s_usrProto[SY_MAX_SESSIONS];
+static lv_obj_t *s_usrTime[SY_MAX_SESSIONS];
+
+#define USR_ROW_H 30
 
 static void buildOverview()
 {
     lv_obj_t *scr = newScreen(SY_DARK);
     s_scr[PAGE_OVERVIEW] = scr;
-    pageHeader(scr, "SESSION");
+    pageHeader(scr, "CONNECTED USERS");
 
+    mkLabel(scr, "USER", 34, 40, fSmall(), SY_MUTED, nullptr);
+    mkLabel(scr, "PROTOCOL", 120, 40, fSmall(), SY_MUTED, nullptr);
     lv_obj_t *cap = nullptr;
-    mkLabel(scr, "CURRENT SESSION", SY_PAD, 42, fSmall(), SY_MUTED, &cap);
-    lv_obj_set_width(cap, SY_CONTENT_W);
-    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
+    mkLabel(scr, "ONLINE", 182, 40, fSmall(), SY_MUTED, &cap);
+    lv_obj_set_width(cap, 72);
+    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_RIGHT, 0);
 
-    s_ovUser = nullptr;
-    mkLabel(scr, "--", SY_PAD, 56, fHuge(), SY_TEXT, &s_ovUser);
-    lv_obj_set_size(s_ovUser, SY_CONTENT_W, 52);
-    lv_obj_set_style_text_align(s_ovUser, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_ovUser, LV_LABEL_LONG_DOT);
+    /* Scrollable list. Gestures that start inside it scroll instead of
+     * navigating; HOME button and the B key still leave the page. */
+    s_usrList = lv_obj_create(scr);
+    lv_obj_set_pos(s_usrList, SY_PAD, 54);
+    lv_obj_set_size(s_usrList, SY_CONTENT_W, 148);
+    lv_obj_set_style_bg_opa(s_usrList, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_usrList, 0, 0);
+    lv_obj_set_style_radius(s_usrList, 0, 0);
+    lv_obj_set_style_pad_all(s_usrList, 0, 0);
+    lv_obj_set_scrollbar_mode(s_usrList, LV_SCROLLBAR_MODE_OFF);
 
-    mkPanel(scr, SY_PAD + 40, 114, SY_CONTENT_W - 80, 1, SY_LINE, 0);
+    for (int i = 0; i < SY_MAX_SESSIONS; i++) {
+        lv_coord_t y = i * USR_ROW_H;
 
-    s_ovProto = nullptr;
-    mkLabel(scr, "HTTP", SY_PAD, 120, fValue(), SY_TEAL, &s_ovProto);
-    lv_obj_set_width(s_ovProto, 130);
-    lv_obj_set_style_text_align(s_ovProto, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_t *dot = lv_obj_create(s_usrList);
+        lv_obj_set_size(dot, 12, 12);
+        lv_obj_set_pos(dot, 4, y + 8);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot, SY_TEAL, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(dot, 0, 0);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        s_usrDot[i] = dot;
 
-    s_ovState = nullptr;
-    mkLabel(scr, "NOT CONNECTED", SY_PAD + 130, 120, fValue(), SY_MUTED, &s_ovState);
-    lv_obj_set_width(s_ovState, 130);
-    lv_obj_set_style_text_align(s_ovState, LV_TEXT_ALIGN_RIGHT, 0);
+        s_usrName[i] = nullptr;
+        mkLabel(s_usrList, "", 24, y + 5, fValue(), SY_TEXT, &s_usrName[i]);
+        lv_obj_set_width(s_usrName[i], 84);
+        lv_label_set_long_mode(s_usrName[i], LV_LABEL_LONG_DOT);
+        lv_obj_add_flag(s_usrName[i], LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_t *sinceCap = nullptr;
-    mkLabel(scr, "CONNECTED SINCE", SY_PAD, 150, fSmall(), SY_MUTED, &sinceCap);
-    lv_obj_set_width(sinceCap, SY_CONTENT_W);
-    lv_obj_set_style_text_align(sinceCap, LV_TEXT_ALIGN_CENTER, 0);
+        s_usrProto[i] = nullptr;
+        mkLabel(s_usrList, "", 112, y + 6, fSmall(), SY_MUTED, &s_usrProto[i]);
+        lv_obj_set_width(s_usrProto[i], 66);
+        lv_obj_add_flag(s_usrProto[i], LV_OBJ_FLAG_HIDDEN);
 
-    s_ovSince = nullptr;
-    mkLabel(scr, "--", SY_PAD, 164, fValue(), SY_TEXT, &s_ovSince);
-    lv_obj_set_width(s_ovSince, SY_CONTENT_W);
-    lv_obj_set_style_text_align(s_ovSince, LV_TEXT_ALIGN_CENTER, 0);
+        s_usrTime[i] = nullptr;
+        mkLabel(s_usrList, "", 182, y + 6, fSmall(), SY_TEXT, &s_usrTime[i]);
+        lv_obj_set_width(s_usrTime[i], 72);
+        lv_obj_set_style_text_align(s_usrTime[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_add_flag(s_usrTime[i], LV_OBJ_FLAG_HIDDEN);
+    }
 
-    s_ovDuration = nullptr;
-    mkLabel(scr, "", SY_PAD, 188, fSmall(), SY_MUTED, &s_ovDuration);
-    lv_obj_set_width(s_ovDuration, SY_CONTENT_W);
-    lv_obj_set_style_text_align(s_ovDuration, LV_TEXT_ALIGN_CENTER, 0);
+    s_usrMsg = nullptr;
+    mkLabel(scr, "Reading sessions...", SY_PAD, 116, fText(), SY_MUTED, &s_usrMsg);
+    lv_obj_set_width(s_usrMsg, SY_CONTENT_W);
+    lv_obj_set_style_text_align(s_usrMsg, LV_TEXT_ALIGN_CENTER, 0);
 
-    s_ovHost = nullptr;
-    mkLabel(scr, "", SY_PAD, 214, fSmall(), SY_MUTED, &s_ovHost);
-    lv_obj_set_width(s_ovHost, SY_CONTENT_W);
-    lv_obj_set_style_text_align(s_ovHost, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_ovHost, LV_LABEL_LONG_DOT);
+    s_usrNote = nullptr;
+    mkLabel(scr, "", SY_PAD, 210, fSmall(), SY_MUTED, &s_usrNote);
+    lv_obj_set_width(s_usrNote, SY_CONTENT_W);
+    lv_label_set_long_mode(s_usrNote, LV_LABEL_LONG_DOT);
 }
 
-/* The page shows the account this app logs in with (not the NAS-wide session
- * list: SYNO.Core.CurrentConnection returns every DSM session and does not
- * mark the requesting one, so it cannot identify us reliably). */
+/* H:MM:SS with unbounded hours (e.g. 120:05:00 stays 120:05:00). */
+static void fmtDuration(uint32_t sec, char *out, size_t n)
+{
+    if (sec == 0xFFFFFFFFu) {
+        snprintf(out, n, "--:--:--");
+        return;
+    }
+    uint32_t h = sec / 3600;
+    uint32_t m = (sec / 60) % 60;
+    uint32_t s = sec % 60;
+    snprintf(out, n, "%02u:%02u:%02u", (unsigned)h, (unsigned)m, (unsigned)s);
+}
+
+static void setRowVisible(int i, bool on)
+{
+    lv_obj_t *objs[4] = { s_usrDot[i], s_usrName[i], s_usrProto[i], s_usrTime[i] };
+    for (int k = 0; k < 4; k++) {
+        if (!objs[k]) continue;
+        if (on) lv_obj_clear_flag(objs[k], LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(objs[k], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void overviewApply(const Snapshot &s)
 {
-    static uint32_t lastCfgMs = 0;
-    static char user[40] = "";
-    static char host[64] = "";
-    static bool https = false;
+    if (!s.usersValid) {
+        for (int i = 0; i < SY_MAX_SESSIONS; i++) setRowVisible(i, false);
+        lv_obj_clear_flag(s_usrMsg, LV_OBJ_FLAG_HIDDEN);
 
-    uint32_t now = millis();
-    if (lastCfgMs == 0 || now - lastCfgMs > 2000) {
-        lastCfgMs = now;
-        Config c;
-        CfgGet(c);
-        snprintf(user, sizeof(user), "%s", c.user.length() ? c.user.c_str() : "");
-        snprintf(host, sizeof(host), "%s:%u", c.host.c_str(), (unsigned)c.port);
-        https = c.https;
+        char m[48];
+        if (s.usersErr) snprintf(m, sizeof(m), "Sessions unavailable (%d)", (int)s.usersErr);
+        else if (s.conn != CONN_ONLINE) snprintf(m, sizeof(m), "%s", connText(s.conn));
+        else snprintf(m, sizeof(m), "Reading sessions...");
+        setTextIfChanged(s_usrMsg, m);
+        lv_obj_set_style_text_color(s_usrMsg, s.usersErr ? SY_RED : SY_MUTED, 0);
+        setTextIfChanged(s_usrNote, "");
+        return;
     }
 
-    setTextIfChanged(s_ovUser, user[0] ? user : "not configured");
-    setTextIfChanged(s_ovProto, https ? "HTTPS" : "HTTP");
-    lv_obj_set_style_text_color(s_ovProto, https ? SY_TEAL : SY_AMBER, 0);
+    if (s.userCount == 0) {
+        for (int i = 0; i < SY_MAX_SESSIONS; i++) setRowVisible(i, false);
+        lv_obj_clear_flag(s_usrMsg, LV_OBJ_FLAG_HIDDEN);
+        setTextIfChanged(s_usrMsg, "No users connected");
+        setTextIfChanged(s_usrNote, "");
+        return;
+    }
 
-    setTextIfChanged(s_ovState, connText(s.conn));
-    lv_obj_set_style_text_color(s_ovState, connColor(s.conn), 0);
+    lv_obj_add_flag(s_usrMsg, LV_OBJ_FLAG_HIDDEN);
 
-    /* Connected-since is recorded by this app when DSM accepted the login.
-     * It is not a DSM "last login" value and is labelled as such. */
-    char since[24];
-    if (s.conn == CONN_ONLINE && s.sessSince > 1600000000u) {
-        time_t t = (time_t)s.sessSince;
-        struct tm tmv;
-        if (localtime_r(&t, &tmv)) {
-            snprintf(since, sizeof(since), "%04d-%02d-%02d %02d:%02d",
-                     tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
-                     tmv.tm_hour, tmv.tm_min);
-        } else {
-            snprintf(since, sizeof(since), "--");
+    for (int i = 0; i < SY_MAX_SESSIONS; i++) {
+        if (i >= (int)s.userCount) {
+            setRowVisible(i, false);
+            continue;
         }
-    } else if (s.conn == CONN_ONLINE && s.sessSinceMs) {
-        snprintf(since, sizeof(since), "clock not set");
-    } else {
-        snprintf(since, sizeof(since), "--");
-    }
-    setTextIfChanged(s_ovSince, since);
+        setRowVisible(i, true);
 
-    char dur[32];
-    if (s.conn == CONN_ONLINE && s.sessSinceMs) {
-        uint32_t sec = (millis() - s.sessSinceMs) / 1000;
-        if (sec >= 3600) snprintf(dur, sizeof(dur), "APP CONNECTED  %uh %02um", (unsigned)(sec / 3600), (unsigned)((sec / 60) % 60));
-        else             snprintf(dur, sizeof(dur), "APP CONNECTED  %um %02us", (unsigned)(sec / 60), (unsigned)(sec % 60));
-    } else {
-        dur[0] = 0;
-    }
-    setTextIfChanged(s_ovDuration, dur);
+        const SessionInfo &u = s.users[i];
+        setTextIfChanged(s_usrName[i], u.who[0] ? u.who : "?");
+        setTextIfChanged(s_usrProto[i], u.proto[0] ? u.proto : "n/a");
 
-    setTextIfChanged(s_ovHost, host[0] && host[0] != ':' ? host : "");
+        char d[16];
+        fmtDuration(u.seconds, d, sizeof(d));
+        setTextIfChanged(s_usrTime[i], d);
+        lv_obj_set_style_text_color(s_usrTime[i], u.seconds == 0xFFFFFFFFu ? SY_MUTED : SY_TEXT, 0);
+    }
+
+    /* The NAS exposes no session-termination method (see report), so this page
+     * is read-only and says so instead of offering a button that cannot work. */
+    char note[48];
+    snprintf(note, sizeof(note), "%u sessions - view only", (unsigned)s.userCount);
+    setTextIfChanged(s_usrNote, note);
 }
 
 /* ========================================================= storage page */
@@ -653,13 +767,18 @@ static void buildStorage()
 
         s_storName[i] = nullptr;
         mkLabel(card, "-", 10, 2, fValue(), SY_TEXT, &s_storName[i]);
-        lv_obj_set_width(s_storName[i], 180);
+        lv_obj_set_width(s_storName[i], 150);
         lv_label_set_long_mode(s_storName[i], LV_LABEL_LONG_DOT);
 
         s_storPct[i] = nullptr;
-        mkLabel(card, "-", 190, 2, fValue(), SY_TEAL, &s_storPct[i]);
-        lv_obj_set_width(s_storPct[i], 60);
+        mkLabel(card, "-", 170, 2, fValue(), SY_TEAL, &s_storPct[i]);
+        lv_obj_set_width(s_storPct[i], 62);
         lv_obj_set_style_text_align(s_storPct[i], LV_TEXT_ALIGN_RIGHT, 0);
+
+        /* chevron: this card opens the disk detail page */
+        mkLabel(card, ">", 240, 3, fSmall(), SY_MUTED, nullptr);
+
+        lv_obj_add_event_cb(card, diskCard_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
         lv_obj_t *bar = lv_bar_create(card);
         lv_obj_set_pos(bar, 10, 22);
@@ -787,6 +906,212 @@ static void storApply(const Snapshot &s)
     else                            snprintf(dl, sizeof(dl), "%u disks OK", (unsigned)s.diskCount);
     setTextIfChanged(s_storDisk, dl);
     lv_obj_set_style_text_color(s_storDisk, s.diskWarn > 0 ? SY_AMBER : SY_MUTED, 0);
+}
+
+/* ============================================================ disk page */
+static uint8_t   s_diskIndex = 0;
+static uint32_t  s_gestureAt = 0;
+static lv_obj_t *s_diskName, *s_diskArc, *s_diskArcPct;
+static lv_obj_t *s_diskVal[4];
+static lv_obj_t *s_diskVol, *s_diskVolInfo, *s_diskBar, *s_diskNote;
+
+static void diskCard_cb(lv_event_t *e)
+{
+    /* A swipe also fires CLICKED on a non-scrollable object; ignore taps that
+     * follow a page gesture so swiping never opens a disk. */
+    if ((int32_t)(millis() - s_gestureAt) < 400) return;
+
+    int slot = (int)(intptr_t)lv_event_get_user_data(e);
+    int idx = (int)s_storPage * STOR_CARDS + slot;
+
+    int have = 0;
+    if (DataLock(20)) {
+        have = Data().diskCount;
+        DataUnlock();
+    }
+    if (idx < 0 || idx >= have) return;
+
+    s_diskIndex = (uint8_t)idx;
+    UiNavigate(PAGE_DISK, true);
+}
+
+static void buildDisk()
+{
+    lv_obj_t *scr = newScreen(SY_DARK);
+    s_scr[PAGE_DISK] = scr;
+    pageHeaderBack(scr, "DISK");
+
+    s_diskName = nullptr;
+    mkLabel(scr, "--", SY_PAD, 38, fValue(), SY_TEXT, &s_diskName);
+    lv_obj_set_width(s_diskName, SY_CONTENT_W);
+
+    /* ring: capacity usage of the volume on this disk's pool (or "n/a") */
+    s_diskArc = lv_arc_create(scr);
+    lv_obj_set_pos(s_diskArc, SY_PAD, 60);
+    lv_obj_set_size(s_diskArc, 84, 84);
+    lv_arc_set_rotation(s_diskArc, 270);
+    lv_arc_set_bg_angles(s_diskArc, 0, 360);
+    lv_arc_set_range(s_diskArc, 0, 100);
+    lv_arc_set_value(s_diskArc, 0);
+    lv_obj_remove_style(s_diskArc, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(s_diskArc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_opa(s_diskArc, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_diskArc, 0, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_diskArc, 8, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_diskArc, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_diskArc, SY_LINE, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_diskArc, SY_GREEN, LV_PART_INDICATOR);
+
+    s_diskArcPct = nullptr;
+    mkLabel(s_diskArc, "--", 0, 0, fValue(), SY_TEXT, &s_diskArcPct);
+    lv_obj_set_width(s_diskArcPct, 60);
+    lv_obj_set_style_text_align(s_diskArcPct, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_diskArcPct, LV_ALIGN_CENTER, 0, 0);
+
+    static const char *cap[4] = { "MODEL", "TEMP", "HEALTH", "CAPACITY" };
+    for (int i = 0; i < 4; i++) {
+        lv_coord_t y = 62 + i * 22;
+        mkLabel(scr, cap[i], 104, y + 3, fSmall(), SY_MUTED, nullptr);
+        s_diskVal[i] = nullptr;
+        mkLabel(scr, "--", 150, y + 2, fSmall(), SY_TEXT, &s_diskVal[i]);
+        lv_obj_set_width(s_diskVal[i], 120);
+        lv_obj_set_style_text_align(s_diskVal[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_long_mode(s_diskVal[i], LV_LABEL_LONG_DOT);
+    }
+
+    s_diskVol = nullptr;
+    mkLabel(scr, "", SY_PAD, 156, fSmall(), SY_MUTED, &s_diskVol);
+    lv_obj_set_width(s_diskVol, SY_CONTENT_W);
+    lv_label_set_long_mode(s_diskVol, LV_LABEL_LONG_DOT);
+
+    s_diskVolInfo = nullptr;
+    mkLabel(scr, "", SY_PAD, 172, fSmall(), SY_MUTED, &s_diskVolInfo);
+    lv_obj_set_width(s_diskVolInfo, SY_CONTENT_W);
+    lv_label_set_long_mode(s_diskVolInfo, LV_LABEL_LONG_DOT);
+
+    s_diskBar = lv_bar_create(scr);
+    lv_obj_set_pos(s_diskBar, SY_PAD, 190);
+    lv_obj_set_size(s_diskBar, SY_CONTENT_W, 6);
+    lv_obj_set_style_bg_color(s_diskBar, SY_LINE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_diskBar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_diskBar, SY_GREEN, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_diskBar, 3, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_diskBar, 3, LV_PART_INDICATOR);
+    lv_bar_set_range(s_diskBar, 0, 100);
+
+    s_diskNote = nullptr;
+    mkLabel(scr, "", SY_PAD, 208, fSmall(), SY_MUTED, &s_diskNote);
+    lv_obj_set_size(s_diskNote, SY_CONTENT_W, 18);
+    lv_label_set_long_mode(s_diskNote, LV_LABEL_LONG_DOT);
+}
+
+/* A pool id such as "reuse_1" maps to the volume whose name ends with "_1".
+ * Only used when exactly one volume matches; otherwise the mapping is
+ * ambiguous and no usage is shown. */
+static int volForPool(const Snapshot &s, const char *pool)
+{
+    if (!pool || !pool[0]) return -1;
+    const char *suffix = strrchr(pool, '_');
+    if (!suffix) return -1;
+
+    int found = -1;
+    for (int i = 0; i < s.volCount && i < SY_MAX_VOLUMES; i++) {
+        size_t len = strlen(s.vols[i].name);
+        size_t sl = strlen(suffix);
+        if (len <= sl) continue;
+        if (strcmp(s.vols[i].name + len - sl, suffix) != 0) continue;
+        if (found >= 0) return -1;      /* ambiguous */
+        found = i;
+    }
+    return found;
+}
+
+static void diskApply(const Snapshot &s)
+{
+    if (!s.storageValid || s_diskIndex >= s.diskCount) {
+        setTextIfChanged(s_diskName, "No disk data");
+        return;
+    }
+    const DiskInfo &d = s.disks[s_diskIndex];
+    char b[72];
+
+    setTextIfChanged(s_diskName, d.name[0] ? d.name : "Disk");
+
+    setTextIfChanged(s_diskVal[0], d.model[0] ? d.model : "n/a");
+
+    if (d.temp >= 0) snprintf(b, sizeof(b), "%d C", (int)d.temp);
+    else             snprintf(b, sizeof(b), "n/a");
+    setTextIfChanged(s_diskVal[1], b);
+    lv_obj_set_style_text_color(s_diskVal[1], d.temp >= 55 ? SY_WARN : SY_TEXT, 0);
+
+    /* Health is DSM's own status word; it is not derived from the temperature. */
+    const char *health = d.status;
+    lv_color_t hc = SY_MUTED;
+    if (!health[0]) {
+        setTextIfChanged(s_diskVal[2], "Unknown");
+    } else if (strcmp(health, "normal") == 0) {
+        setTextIfChanged(s_diskVal[2], "Healthy");
+        hc = SY_GREEN;
+    } else if (strstr(health, "crit") || strstr(health, "fail") || strstr(health, "crash")) {
+        setTextIfChanged(s_diskVal[2], health);
+        hc = SY_CRIT;
+    } else if (strstr(health, "warn") || strstr(health, "degrad")) {
+        setTextIfChanged(s_diskVal[2], health);
+        hc = SY_WARN;
+    } else {
+        setTextIfChanged(s_diskVal[2], health);
+        hc = SY_WARN;      /* unrecognised word: never shown as healthy */
+    }
+    lv_obj_set_style_text_color(s_diskVal[2], hc, 0);
+
+    if (d.capacity > 0) {
+        fmtBytes(d.capacity, b, sizeof(b));
+        setTextIfChanged(s_diskVal[3], b);
+    } else {
+        setTextIfChanged(s_diskVal[3], "n/a");
+    }
+
+    /* Ring = usage of the VOLUME living on this disk's pool, never "disk used". */
+    int vi = volForPool(s, d.pool);
+    if (vi >= 0 && s.vols[vi].total > 0) {
+        const VolumeInfo &v = s.vols[vi];
+        uint64_t used = v.used > v.total ? v.total : v.used;
+        int pct = (int)((used * 100ULL) / v.total);
+        if (pct > 100) pct = 100;
+
+        snprintf(b, sizeof(b), "VOLUME %s", v.name);
+        setTextIfChanged(s_diskVol, b);
+
+        char u[16], t[16];
+        fmtBytes(used, u, sizeof(u));
+        fmtBytes(v.total, t, sizeof(t));
+        snprintf(b, sizeof(b), "%s used / %s (%d%%)", u, t, pct);
+        setTextIfChanged(s_diskVolInfo, b);
+
+        lv_obj_clear_flag(s_diskBar, LV_OBJ_FLAG_HIDDEN);
+        lv_arc_set_value(s_diskArc, pct);
+        lv_obj_set_style_arc_color(s_diskArc, ringColor(pct), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(s_diskBar, ringColor(pct), LV_PART_INDICATOR);
+        lv_bar_set_value(s_diskBar, pct, LV_ANIM_OFF);
+
+        char pb[8];
+        snprintf(pb, sizeof(pb), "%d%%", pct);
+        setTextIfChanged(s_diskArcPct, pb);
+        lv_obj_set_style_text_color(s_diskArcPct, ringColor(pct), 0);
+    } else {
+        /* No 1:1 pool -> volume mapping: draw no proportion at all. */
+        setTextIfChanged(s_diskVol, "VOLUME USAGE n/a");
+        setTextIfChanged(s_diskVolInfo, "No volume mapping recorded by DSM");
+        lv_arc_set_value(s_diskArc, 0);
+        lv_obj_set_style_arc_color(s_diskArc, SY_LINE, LV_PART_INDICATOR);
+        lv_obj_add_flag(s_diskBar, LV_OBJ_FLAG_HIDDEN);
+        setTextIfChanged(s_diskArcPct, "n/a");
+        lv_obj_set_style_text_color(s_diskArcPct, SY_MUTED, 0);
+    }
+
+    if (d.pool[0]) snprintf(b, sizeof(b), "pool %s", d.pool);
+    else           b[0] = 0;
+    setTextIfChanged(s_diskNote, b);
 }
 
 /* =========================================================== system page */
@@ -1538,12 +1863,14 @@ static lv_scr_load_anim_t animFor(PageId from, PageId to)
     case PAGE_SETTINGS: return LV_SCR_LOAD_ANIM_MOVE_TOP;
     case PAGE_STORAGE:  return LV_SCR_LOAD_ANIM_MOVE_LEFT;
     case PAGE_SYSTEM:   return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
+    case PAGE_DISK:     return LV_SCR_LOAD_ANIM_MOVE_LEFT;
     case PAGE_UPS:      return LV_SCR_LOAD_ANIM_MOVE_LEFT;
     case PAGE_HOME:
     default:
         if (from == PAGE_STORAGE) return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
         if (from == PAGE_SYSTEM)  return LV_SCR_LOAD_ANIM_MOVE_LEFT;
         if (from == PAGE_UPS)     return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
+        if (from == PAGE_DISK)    return LV_SCR_LOAD_ANIM_MOVE_RIGHT;
         return LV_SCR_LOAD_ANIM_MOVE_BOTTOM;
     }
 }
@@ -1570,7 +1897,7 @@ void UiNavigate(PageId page, bool animate)
     if (page == PAGE_SETTINGS) {
         CfgGet(s_draft);
         settingsApplyDraft();
-    } else if (page == PAGE_OVERVIEW || page == PAGE_STORAGE ||
+    } else if (page == PAGE_OVERVIEW || page == PAGE_STORAGE || page == PAGE_DISK ||
                page == PAGE_SYSTEM || page == PAGE_UPS) {
         NetRequestFast();
     }
@@ -1581,6 +1908,7 @@ void UiNavigate(PageId page, bool animate)
         if (page == PAGE_HOME) updateHome(s, true);
         else if (page == PAGE_OVERVIEW) overviewApply(s);
         else if (page == PAGE_STORAGE) storApply(s);
+        else if (page == PAGE_DISK) diskApply(s);
         else if (page == PAGE_SYSTEM) sysApply(s);
         else if (page == PAGE_UPS) upsApply(s);
         else if (page == PAGE_SETTINGS) settingsRefresh(s);
@@ -1592,17 +1920,33 @@ PageId UiCurrentPage()
     return s_cur;
 }
 
+/* True when the touch started inside the scrollable user list: those swipes
+ * belong to the list, not to page navigation. */
+static bool fingerOnUserList()
+{
+    lv_obj_t *o = lv_indev_get_obj_act();
+    int depth = 0;
+    while (o && depth++ < 12) {
+        if (o == s_usrList) return true;
+        o = lv_obj_get_parent(o);
+    }
+    return false;
+}
+
 static void gesture_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_GESTURE) return;
     if (s_modal) return;
     if ((int32_t)(millis() - s_navBlockUntil) < 0) return;
     if (underFingerBlocked()) return;
+    if (s_cur == PAGE_OVERVIEW && fingerOnUserList()) return;
 
     lv_indev_t *indev = lv_indev_get_act();
     if (!indev) return;
     lv_dir_t dir = lv_indev_get_gesture_dir(indev);
     if (dir == LV_DIR_NONE) return;
+
+    s_gestureAt = millis();
 
     if (s_cur == PAGE_HOME) {
         if (dir == LV_DIR_LEFT)        UiNavigate(PAGE_STORAGE, true);
@@ -1612,7 +1956,13 @@ static void gesture_cb(lv_event_t *e)
         return;
     }
 
-    /* Every sub page is one level deep: any swipe returns home. */
+    /* The disk page is one level below storage: go back to the list. */
+    if (s_cur == PAGE_DISK) {
+        UiNavigate(PAGE_STORAGE, true);
+        return;
+    }
+
+    /* Every other sub page is one level deep: any swipe returns home. */
     UiNavigate(PAGE_HOME, true);
 }
 
@@ -1645,6 +1995,7 @@ static void buildPage(PageId page)
     case PAGE_OVERVIEW: buildOverview(); break;
     case PAGE_SETTINGS: buildSettings(); break;
     case PAGE_STORAGE:  buildStorage(); break;
+    case PAGE_DISK:     buildDisk(); break;
     case PAGE_SYSTEM:   buildSystem(); break;
     case PAGE_UPS:      buildUps(); break;
     default: break;
@@ -1663,6 +2014,8 @@ void UiBuild(void *bsp)
     s_modal = nullptr;
     s_lastCpu = -1;
     s_lastRam = -1;
+    s_diskIndex = 0;
+    s_gestureAt = 0;
 
     stylesInit();
 
@@ -1716,7 +2069,14 @@ void UiDestroy()
     s_timeLabel = nullptr;
     s_dlVal = s_ulVal = s_dlPeak = s_ulPeak = nullptr;
     s_dot = s_netState = nullptr;
-    s_ovUser = s_ovProto = s_ovState = s_ovSince = s_ovDuration = s_ovHost = nullptr;
+    s_usrList = s_usrMsg = s_usrNote = nullptr;
+    for (int i = 0; i < SY_MAX_SESSIONS; i++) {
+        s_usrDot[i] = s_usrName[i] = s_usrProto[i] = s_usrTime[i] = nullptr;
+    }
+    s_diskName = s_diskArc = s_diskArcPct = nullptr;
+    s_diskVol = s_diskVolInfo = s_diskNote = nullptr;
+    s_diskBar = nullptr;
+    for (int i = 0; i < 4; i++) s_diskVal[i] = nullptr;
     s_storMsg = s_storPageLbl = nullptr;
     s_storDisk = s_storPrev = s_storNext = nullptr;
     for (int i = 0; i < STOR_CARDS; i++) {
@@ -1757,12 +2117,20 @@ void UiRefresh()
     if (s_cur == PAGE_HOME) {
         updateHome(s, false);
     } else if (s_cur == PAGE_OVERVIEW) {
-        if (s_scr[PAGE_OVERVIEW]) overviewApply(s);
+        if (!s_scr[PAGE_OVERVIEW]) return;
+        /* cheap enough to refresh every tick: 8 rows of setTextIfChanged */
+        overviewApply(s);
     } else if (s_cur == PAGE_STORAGE) {
         if (!s_scr[PAGE_STORAGE]) return;
         if (s.storageSeq != seenStor) {
             seenStor = s.storageSeq;
             storApply(s);
+        }
+    } else if (s_cur == PAGE_DISK) {
+        if (!s_scr[PAGE_DISK]) return;
+        if (s.storageSeq != seenStor) {
+            seenStor = s.storageSeq;
+            diskApply(s);
         }
     } else if (s_cur == PAGE_SYSTEM) {
         if (!s_scr[PAGE_SYSTEM]) return;

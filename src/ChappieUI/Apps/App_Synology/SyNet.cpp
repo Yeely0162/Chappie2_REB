@@ -122,7 +122,8 @@ static struct ApiEntry {
     uint8_t minVer;
     uint8_t maxVer;
     uint8_t useVer;
-} s_apiAuth  = { true,  "auth.cgi", 1, 7, 3 },
+} s_apiUsers = { true,  "entry.cgi", 1, 1, 1 },
+  s_apiAuth  = { true,  "auth.cgi", 1, 7, 3 },
   s_apiSys   = { true,  "entry.cgi", 1, 3, 3 },
   s_apiUtil  = { true,  "entry.cgi", 1, 1, 1 },
   s_apiUps   = { true,  "entry.cgi", 1, 1, 1 },
@@ -380,7 +381,7 @@ static void cfgDefaults(Config &c)
     c.port = 5000;
     c.user = "";
     c.pass = "";
-    c.https = false;
+    c.https = true;
 }
 
 void CfgGet(Config &out)
@@ -1237,12 +1238,15 @@ static int fetchStorage()
     }
 
     /* Disk detail is only reported by some DSM builds; never invent it.
-     * DSM 7.3 (verified) returns it as data.hdd_info[] with model/status/temp;
-     * older layouts used disk_info/diskinfo. */
+     * DSM 7.3 (verified) returns data.hdd_info[]:
+     *   diskno "Drive 1", model, status/overview_status, temp, capacity (string),
+     *   diskType, diskPath, volume "reuse_1" (a storage POOL id, not a volume). */
     bool diskApi = false;
     uint8_t diskCount = 0;
     uint8_t diskWarn = 0;
     int16_t diskTemp = -1;
+    DiskInfo dlist[SY_MAX_DISKS];
+    memset(dlist, 0, sizeof(dlist));
 
     JsonArray disks = d["hdd_info"].as<JsonArray>();
     if (disks.isNull()) disks = d["disk_info"].as<JsonArray>();
@@ -1250,11 +1254,23 @@ static int fetchStorage()
     if (!disks.isNull() && disks.size() > 0) {
         diskApi = true;
         for (JsonVariant dv : disks) {
+            if (diskCount >= SY_MAX_DISKS) break;
+            DiskInfo &di = dlist[diskCount];
+
+            setStr(di.name, sizeof(di.name), dv["diskno"] | (dv["name"] | ""));
+            setStr(di.model, sizeof(di.model), dv["model"] | "");
+            setStr(di.status, sizeof(di.status), dv["status"] | (dv["overview_status"] | ""));
+            setStr(di.pool, sizeof(di.pool), dv["volume"] | "");
+            di.capacity = jsonU64(dv["capacity"]);
+            if (di.capacity == 0) di.capacity = jsonU64(dv["size_total"]);
+
+            bool tOk = false;
+            int t = jsonInt(dv["temp"], tOk);
+            di.temp = (tOk && t >= 0) ? (int16_t)clampInt(t, -1, 200) : -1;
+
+            if (di.temp > diskTemp) diskTemp = di.temp;
+            if (di.status[0] && strcmp(di.status, "normal") != 0) diskWarn++;
             diskCount++;
-            int t = dv["temp"] | -1;
-            if (t > diskTemp) diskTemp = (int16_t)clampInt(t, -1, 200);
-            const char *st = dv["status"] | "";
-            if (st[0] && strcmp(st, "normal") != 0) diskWarn++;
         }
     }
 
@@ -1266,6 +1282,7 @@ static int fetchStorage()
         s_data.diskCount = diskCount;
         s_data.diskWarn = diskWarn;
         s_data.diskTempMax = diskTemp;
+        memcpy(s_data.disks, dlist, sizeof(dlist));
         s_data.storageSeq++;
         s_data.lastSlowMs = millis();
         DataUnlock();
@@ -1420,6 +1437,121 @@ static int fetchUps()
     return 0;
 }
 
+/* ------------------------------------------------------- connected users */
+/* "2026/10/28 02:08:08" (first_login_time) -> time_t.
+ * Both this and systime are NAS local time; the same mktime offset is applied
+ * to both, so the derived duration is correct even if the device TZ differs. */
+static time_t parseDateTime(const char *s)
+{
+    int Y = 0, M = 0, D = 0, h = 0, m = 0, sec = 0;
+    if (!s || sscanf(s, "%d/%d/%d %d:%d:%d", &Y, &M, &D, &h, &m, &sec) != 6) return 0;
+    if (Y < 1970 || M < 1 || M > 12 || D < 1 || D > 31) return 0;
+
+    struct tm t;
+    memset(&t, 0, sizeof(t));
+    t.tm_year = Y - 1900;
+    t.tm_mon = M - 1;
+    t.tm_mday = D;
+    t.tm_hour = h;
+    t.tm_min = m;
+    t.tm_sec = sec;
+    t.tm_isdst = 0;
+    return mktime(&t);
+}
+
+/* "Wed Oct 28 03:36:16 2026" (data.systime) -> time_t */
+static time_t parseSysTime(const char *s)
+{
+    char wd[8] = { 0 }, mon[8] = { 0 };
+    int D = 0, h = 0, m = 0, sec = 0, Y = 0;
+    if (!s || sscanf(s, "%7s %7s %d %d:%d:%d %d", wd, mon, &D, &h, &m, &sec, &Y) != 7) return 0;
+
+    static const char *MON[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    int mi = -1;
+    for (int i = 0; i < 12; i++) {
+        if (strncmp(mon, MON[i], 3) == 0) { mi = i; break; }
+    }
+    if (mi < 0 || Y < 1970) return 0;
+
+    struct tm t;
+    memset(&t, 0, sizeof(t));
+    t.tm_year = Y - 1900;
+    t.tm_mon = mi;
+    t.tm_mday = D;
+    t.tm_hour = h;
+    t.tm_min = m;
+    t.tm_sec = sec;
+    t.tm_isdst = 0;
+    return mktime(&t);
+}
+
+/* SYNO.Core.CurrentConnection list: verified on DSM 7.3.
+ * Only method=list exists - delete/remove/kick/logout all answer error 103,
+ * so this app can show the sessions but cannot terminate them. */
+static int fetchUsers()
+{
+    String q = apiPath(s_apiUsers);
+    q += "?api=SYNO.Core.CurrentConnection&method=list&version=";
+    q += String((unsigned)s_apiUsers.useVer);
+    q = withSid(q);
+
+    /* The 8-session payload from this DSM is ~3.1 KB of JSON but needs an
+     * 8 KB document (every key and value is stored again in the pool); 4 KB
+     * ends in NoMemory and would leave the page empty. */
+    DynamicJsonDocument doc(8192);
+    int rc = apiCall(q, "", doc);
+    if (rc) {
+        if (DataLock(30)) { s_data.usersErr = (int16_t)rc; DataUnlock(); }
+        return rc;
+    }
+
+    JsonObject d = doc["data"].as<JsonObject>();
+    if (d.isNull()) {
+        if (DataLock(30)) { s_data.usersErr = ERR_SHAPE; DataUnlock(); }
+        return ERR_SHAPE;
+    }
+
+    time_t nowT = parseSysTime(d["systime"] | "");
+    char nasNow[24] = { 0 };
+    setStr(nasNow, sizeof(nasNow), d["systime"] | "");
+
+    SessionInfo list[SY_MAX_SESSIONS];
+    memset(list, 0, sizeof(list));
+    uint8_t n = 0;
+
+    for (JsonObject it : d["items"].as<JsonArray>()) {
+        if (n >= SY_MAX_SESSIONS) break;
+        const char *who = it["who"] | "";
+        if (!who[0]) continue;
+
+        setStr(list[n].who, sizeof(list[n].who), who);
+
+        const char *proto = it["protocol"] | "";
+        if (!proto[0]) proto = it["type"] | "";
+        setStr(list[n].proto, sizeof(list[n].proto), proto);
+
+        setStr(list[n].from, sizeof(list[n].from), it["from"] | "");
+        list[n].kickable = jsonBool(it["can_be_kicked"]);
+
+        time_t login = parseDateTime(it["first_login_time"] | "");
+        list[n].seconds = (nowT > 0 && login > 0 && nowT >= login)
+                        ? (uint32_t)(nowT - login) : 0xFFFFFFFFu;
+        n++;
+    }
+
+    if (DataLock(80)) {
+        memcpy(s_data.users, list, sizeof(list));
+        s_data.userCount = n;
+        s_data.usersValid = true;
+        s_data.usersErr = 0;
+        s_data.usersSeq++;
+        setStr(s_data.nasTime, sizeof(s_data.nasTime), nasNow);
+        DataUnlock();
+    }
+    return 0;
+}
+
 /* --------------------------------------------------------------- session */
 static bool doLogin(const Config &c, int &err)
 {
@@ -1475,7 +1607,8 @@ static void queryApiInfo()
 {
     String q = "/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=";
     q += "SYNO.API.Auth,SYNO.Core.System,SYNO.Core.System.Utilization,";
-    q += "SYNO.Core.ExternalDevice.UPS,SYNO.Virtualization.Cluster";
+    q += "SYNO.Core.ExternalDevice.UPS,SYNO.Virtualization.Cluster,";
+    q += "SYNO.Core.CurrentConnection";
 
     DynamicJsonDocument doc(3072);
     int rc = apiCall(q, "", doc);
@@ -1495,6 +1628,7 @@ static void queryApiInfo()
         uint8_t     pref;
     } map[] = {
         { "SYNO.API.Auth", &s_apiAuth, 3 },
+        { "SYNO.Core.CurrentConnection", &s_apiUsers, 1 },
         { "SYNO.Core.System", &s_apiSys, 3 },
         { "SYNO.Core.System.Utilization", &s_apiUtil, 1 },
         { "SYNO.Core.ExternalDevice.UPS", &s_apiUps, 1 },
@@ -1749,6 +1883,16 @@ static void netTask(void *arg)
                 if (src == 119) expired = true;
                 else if (src) logApiError("ups", src);
             }
+            if (!expired) {
+                bool haveUsers = false;
+                if (DataLock(20)) { haveUsers = s_data.usersValid; DataUnlock(); }
+                /* only while the page is open, or the first time ever */
+                if (page == PAGE_OVERVIEW || !haveUsers) {
+                    src = fetchUsers();
+                    if (src == 119) expired = true;
+                    else if (src) logApiError("users", src);
+                }
+            }
 
             if (expired) {
                 s_sess.valid = false;
@@ -1797,6 +1941,7 @@ void NetStart(void *bsp)
     s_rate.have = false;
     s_rate.counter = false;
 
+    apiEntryReset(s_apiUsers, 1);
     apiEntryReset(s_apiAuth, 3);
     apiEntryReset(s_apiSys, 3);
     apiEntryReset(s_apiUtil, 1);

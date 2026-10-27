@@ -23,9 +23,10 @@ namespace Sy {
 /* ------------------------------------------------------------------ pages */
 enum PageId : uint8_t {
     PAGE_HOME = 0,
-    PAGE_OVERVIEW,      /* swipe up on the home page */
+    PAGE_OVERVIEW,      /* swipe up on the home page: connected users */
     PAGE_SETTINGS,
     PAGE_STORAGE,
+    PAGE_DISK,          /* one disk, opened from the storage list */
     PAGE_SYSTEM,
     PAGE_UPS,
     PAGE_MAX
@@ -51,6 +52,29 @@ enum UpsState : uint8_t {
     UPS_UNSUPPORTED,    /* API missing on this DSM */
     UPS_NO_PERMISSION,  /* API error 105 */
     UPS_ERROR
+};
+
+/* ------------------------------------------------------ connected users */
+#define SY_MAX_SESSIONS 10
+
+struct SessionInfo {
+    char     who[20];       /* DSM account of the session */
+    char     proto[12];     /* protocol string as reported, e.g. "HTTP/HTTPS" */
+    char     from[16];      /* client address */
+    uint32_t seconds;       /* online duration, 0xFFFFFFFF when unknown */
+    bool     kickable;      /* NAS says the session may be terminated */
+};
+
+/* ------------------------------------------------------------------ disks */
+#define SY_MAX_DISKS 8
+
+struct DiskInfo {
+    char     name[16];      /* "Drive 1" (hdd_info.diskno) */
+    char     model[24];
+    char     status[12];    /* hdd_info.status, e.g. "normal" */
+    char     pool[16];      /* hdd_info.volume, e.g. "reuse_1" (pool id) */
+    uint64_t capacity;
+    int16_t  temp;          /* Celsius, -1 = unknown */
 };
 
 /* ---------------------------------------------------------------- volumes */
@@ -112,6 +136,7 @@ struct Snapshot {
     uint8_t  diskCount;
     uint8_t  diskWarn;
     int16_t  diskTempMax;
+    DiskInfo disks[SY_MAX_DISKS];
     uint8_t  volCount;
     VolumeInfo vols[SY_MAX_VOLUMES];
 
@@ -123,6 +148,14 @@ struct Snapshot {
     int32_t  upsRuntime;     /* seconds */
     char     upsModel[24];
     char     upsRaw[20];     /* raw status word when it is not understood */
+
+    /* connected users (slow poll, SYNO.Core.CurrentConnection) */
+    bool        usersValid;
+    int16_t     usersErr;       /* last API error for the session list, 0 = ok */
+    uint32_t    usersSeq;
+    uint8_t     userCount;
+    SessionInfo users[SY_MAX_SESSIONS];
+    char        nasTime[24];     /* NAS wall clock used to derive the durations */
 
     /* connection / diagnostics */
     ConnState conn;
