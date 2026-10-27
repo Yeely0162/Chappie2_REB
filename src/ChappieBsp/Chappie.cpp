@@ -76,14 +76,14 @@ void CHAPPIE::init()
 {
     /* One mutex for every multi-step I2C transaction on the shared bus.
      * Static allocation cannot fail at runtime. */
-    // if (g_chappie_i2c_mutex == NULL) {
-    //     g_chappie_i2c_mutex = xSemaphoreCreateMutexStatic(&g_chappie_i2c_mutex_buffer);
-    //     if (g_chappie_i2c_mutex == NULL) {
-    //         printf("[I2C] mutex create failed\n");
-    //         while (1)
-    //             delay(1000);
-    //     }
-    // }
+    if (g_chappie_i2c_mutex == NULL) {
+        g_chappie_i2c_mutex = xSemaphoreCreateMutexStatic(&g_chappie_i2c_mutex_buffer);
+        if (g_chappie_i2c_mutex == NULL) {
+            printf("[I2C] mutex create failed\n");
+            while (1)
+                delay(1000);
+        }
+    }
 
     /* Init I2C */
     Wire.begin(5, 4);
@@ -129,7 +129,7 @@ void CHAPPIE::init()
     /* Init SD card */
     Sd.init();
     /* Init MAG */
-    Mag.init();
+    // Mag.init();
     /* Init BMP280 */
     Env.init();
     
